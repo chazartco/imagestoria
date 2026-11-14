@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1a1b1d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ImageStoria">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="same-origin">
+<title>ImageStoria</title>
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/assets/maplibre-gl.css?v={{V}}">
+<link rel="stylesheet" href="/assets/app.css?v={{V}}">
+</head>
+<body>
+<div id="app" hidden>
+<header class="top">
+  <a class="brand" href="/" title="ImageStoria">
+    <svg class="brand-mark" viewBox="6 14 82 62" aria-hidden="true">{{MARK}}</svg>
+    <span class="brand-name">ImageStoria</span>
+  </a>
+  <div class="spacebar"><div class="spaces" role="tablist" aria-label="Space"></div><select class="inp spacesel" id="spaceSel" aria-label="Space" hidden></select><button class="iconbtn" id="btnAddSpace" hidden title="Add a space" aria-label="Add a space"><i data-ic="plus" data-size="16"></i></button></div>
+  <nav class="views" aria-label="Views">
+    <button data-view="library" class="on">Library</button>
+    <button data-view="map">Map</button>
+    <button data-view="stories">Stories</button>
+    <button data-view="reels">Reels</button>
+    <button data-view="people" hidden>People</button>
+  </nav>
+  <div class="lens">
+    <span class="lens-ic" id="lensIc"></span>
+    <input id="lensInput" type="search" autocomplete="off" spellcheck="false" placeholder="Search places, tags, colors, cameras, years" aria-label="Search your library">
+    <kbd>/</kbd>
+    <div class="lens-sug" id="lensSug" role="listbox" hidden></div>
+  </div>
+  <button class="btn primary" id="btnUpload"><span id="upIc"></span><span>Add photos</span></button>
+  <button class="avatar" id="btnMe" aria-label="Account menu"></button>
+</header>
+
+<main>
+  <div class="browse">
+    <aside id="facets" aria-label="Filters"></aside>
+    <div id="facetScrim" aria-hidden="true"></div>
+    <section id="v-library">
+      <div class="libbar">
+        <button class="iconbtn" id="btnFacets" title="Show or hide filters" aria-label="Show or hide filters"></button>
+        <span class="libcount" id="libCount"></span>
+        <div class="chips" id="chips"></div>
+        <label class="ctl grp"><span>Group</span> <select id="selGroup" class="inp" aria-label="Group by"><option value="month">Month</option><option value="day">Day</option><option value="place">Place</option><option value="series" id="optSeries" hidden>Series</option><option value="none">Nothing</option></select></label>
+        <label class="ctl srt"><span>Sort</span> <select id="selSort" class="inp" aria-label="Sort by"><option value="new">Newest</option><option value="old">Oldest</option><option value="added">Recently added</option></select></label>
+        <label class="ctl size">Size <input type="range" id="rowH" class="sl" min="110" max="420" step="10" value="210" aria-label="Photo size"></label>
+      </div>
+      <div class="gridwrap">
+        <div id="gridScroll" tabindex="-1">
+          <div id="grid"></div>
+          <div class="empty" id="emptyLib" hidden><p id="emptyText">Nothing matches these filters.</p><button class="btn" id="emptyClear">Clear filters</button><button class="btn primary" id="emptyAdd" hidden>Add photos</button></div>
+        </div>
+        <div id="ribbon" aria-hidden="true"></div>
+      </div>
+    </section>
+    <section id="v-map" hidden>
+      <div class="libbar"><span class="libcount" id="mapCount"></span><span class="mapnote muted" id="mapNote" hidden></span><span class="grow1"></span><button class="btn small" id="mapToLib">Show these in the library</button></div>
+      <div id="mapEl"><div id="mapFree"></div></div>
+      <div class="maptray"><div class="strip" id="mapStrip"></div></div>
+    </section>
+  </div>
+  <section id="v-stories" hidden></section>
+  <section id="v-reels" hidden></section>
+  <section id="v-people" hidden></section>
+  <section id="v-trash" hidden></section>
+</main>
+
+<div class="bulk" id="bulk" hidden role="toolbar" aria-label="Actions for selected items">
+  <b id="bulkCount"></b>
+  <button class="btn small" data-bulk="tag" data-cap="tag"><i data-ic="tag"></i><span>Tag</span></button>
+  <button class="btn small" data-bulk="location" data-cap="tag"><i data-ic="pin"></i><span>Location</span></button>
+  <button class="btn small" data-bulk="date" data-cap="tag"><i data-ic="cal"></i><span>Date</span></button>
+  <button class="btn small" data-bulk="fav"><i data-ic="heart"></i><span>Like</span></button>
+  <button class="btn small" data-bulk="story" data-cap="edit"><i data-ic="book"></i><span>Make story</span></button>
+  <button class="btn small" data-bulk="reel" data-cap="edit"><i data-ic="film"></i><span>Make reel</span></button>
+  <button class="btn small" data-bulk="move" data-cap="admin" id="bulkMove"><i data-ic="layers"></i><span>Move</span></button>
+  <button class="btn small" data-bulk="download" data-cap="download"><i data-ic="down"></i><span>Download</span></button>
+  <button class="btn small" data-bulk="delete" data-cap="del"><i data-ic="trash"></i><span>Trash</span></button>
+  <button class="iconbtn" data-bulk="clear" title="Clear selection" aria-label="Clear selection"><i data-ic="x"></i></button>
+</div>
+
+<!-- viewer: a modal over the library. The original opens inside the same frame. -->
+<div class="overlay viewer" id="viewer" hidden role="dialog" aria-modal="true" aria-label="Photo">
+  <div class="vw-box" id="vwBox">
+    <button class="iconbtn modal-x vw-close" id="vwClose" title="Close" aria-label="Close"><i data-ic="x"></i></button>
+    <div class="vw-stage" id="vwStage">
+      <div class="vw-top"><span class="vw-count" id="vwCount"></span><span class="grow1"></span><div class="vw-tools" id="vwTools"></div><button class="iconbtn" id="vwFold" title="Hide details" aria-label="Hide details"><i data-ic="panel"></i></button></div>
+      <div class="vw-frame" id="vwFrame">
+        <img id="vwImg" alt="" draggable="false">
+        <video id="vwVideo" controls playsinline preload="metadata" hidden></video>
+        <button class="btn small vw-unmute" id="vwUnmute" hidden><i data-ic="sound" data-size="16"></i><span>Turn sound on</span></button>
+        <p class="vw-wait" id="vwWait" hidden></p>
+        <p class="vw-playnote" id="vwPlayNote" hidden></p>
+        <div class="loupe" id="loupe" aria-hidden="true"></div>
+        <div class="vw-zoom" id="vwZoom" hidden>
+          <div class="zm-stage" id="zmStage"><img id="zmImg" alt="" draggable="false"></div>
+          <div class="zm-hud"><span id="zmInfo"></span><button class="btn small" data-z="fit">Fit</button><button class="btn small" data-z="100">100%</button><button class="iconbtn" data-z="out" aria-label="Zoom out">−</button><button class="iconbtn" data-z="in" aria-label="Zoom in">+</button></div>
+          <div class="zm-load" id="zmLoad" hidden></div>
+        </div>
+        <button class="vw-nav prev" id="vwPrev" aria-label="Previous"><i data-ic="left" data-size="26"></i></button>
+        <button class="vw-nav next" id="vwNext" aria-label="Next"><i data-ic="right" data-size="26"></i></button>
+      </div>
+      <p class="vw-hint" id="vwHint"></p>
+      <div class="strip vw-strip" id="vwStrip"></div>
+    </div>
+    <aside class="vw-info" id="vwInfo" aria-label="About this photo"></aside>
+    <datalist id="tagList"></datalist>
+  </div>
+</div>
+
+<!-- editor -->
+<div class="overlay editor" id="editor" hidden role="dialog" aria-modal="true" aria-label="Editor">
+ <div class="ed-box" id="edBox">
+  <header class="ed-bar">
+    <span class="ed-title" id="edTitle"></span>
+    <button class="iconbtn" id="edUndo" title="Undo" aria-label="Undo"><i data-ic="undo"></i></button>
+    <button class="iconbtn" id="edRedo" title="Redo" aria-label="Redo"><i data-ic="redo"></i></button>
+    <button class="iconbtn" id="edLoupeBtn" title="Turn magnifier off" aria-label="Turn magnifier off"><i data-ic="loupe"></i></button>
+    <button class="btn small" id="edBefore" title="Hold this button, or hold the B key">Hold to see before</button>
+    <button class="btn small" id="edReset">Reset</button>
+    <button class="btn small primary" id="edSave">Save as copy</button>
+    <button class="iconbtn modal-x" id="edCancel" title="Close" aria-label="Close"><i data-ic="x"></i></button>
+  </header>
+  <div class="ed-main">
+    <div class="ed-stage" id="edStage">
+      <canvas id="edCanvas"></canvas>
+      <div id="cropBox" hidden><span class="thirds"></span><span id="cropSize"></span>
+        <i data-h="nw"></i><i data-h="n"></i><i data-h="ne"></i><i data-h="e"></i><i data-h="se"></i><i data-h="s"></i><i data-h="sw"></i><i data-h="w"></i></div>
+      <canvas class="loupe" id="edLoupe" aria-hidden="true"></canvas>
+      <div class="ed-busy" id="edBusy" hidden>Opening</div>
+    </div>
+    <aside class="ed-panel">
+      <canvas id="edHist" width="520" height="150" aria-label="Histogram"></canvas>
+      <div class="ed-tabs" role="tablist"><button role="tab" data-tab="adjust" class="on">Adjust</button><button role="tab" data-tab="looks">Looks</button><button role="tab" data-tab="crop">Crop</button></div>
+      <div id="edAdjust"></div><div id="edLooks" hidden></div><div id="edCrop" hidden></div>
+    </aside>
+  </div>
+ </div>
+</div>
+
+<!-- people and settings: a modal, like the viewer -->
+<div class="overlay admin" id="admin" hidden role="dialog" aria-modal="true" aria-label="People and settings">
+  <div class="ad-box" id="adBox">
+    <button class="iconbtn modal-x ad-close" id="adClose" title="Close" aria-label="Close"><i data-ic="x"></i></button>
+    <section id="v-admin"></section>
+  </div>
+</div>
+
+<!-- story reader and player -->
+<div class="overlay reader" id="reader" hidden role="dialog" aria-modal="true" aria-label="Story"></div>
+<div class="overlay player" id="player" hidden role="dialog" aria-modal="true" aria-label="Story player">
+  <div class="pl-bg" id="plBg" aria-hidden="true"></div>
+  <div class="pl-bar" id="plBar"></div>
+  <button class="iconbtn modal-x pl-close" id="plClose" title="Close" aria-label="Close"><i data-ic="x"></i></button>
+  <p class="pl-section" id="plSection" aria-live="polite"></p>
+  <img id="plImg" alt="">
+  <video id="plVideo" playsinline preload="auto" hidden></video>
+  <audio id="plAudio" loop preload="auto"></audio>
+  <button class="btn small pl-unmute" id="plUnmute" hidden><i data-ic="sound" data-size="16"></i><span>Turn sound on</span></button>
+  <div class="pl-panel" id="plPanel"><div class="pl-text"><p class="pl-cap" id="plCap"></p><p class="pl-meta" id="plMeta"></p></div>
+    <div class="pl-ctl"><button class="iconbtn" id="plMusic" hidden title="Music off" aria-label="Music off"><i data-ic="note"></i></button><button class="iconbtn" id="plDown" hidden title="Download this file" aria-label="Download this file"><i data-ic="down"></i></button><button class="iconbtn" id="plPrev" aria-label="Previous"><i data-ic="left"></i></button><button class="iconbtn" id="plPlay" aria-label="Play or pause"></button><button class="iconbtn" id="plNext" aria-label="Next"><i data-ic="right"></i></button></div></div>
+</div>
+
+<!-- add files -->
+<div class="overlay sheet" id="upload" hidden role="dialog" aria-modal="true" aria-label="Add photos and videos">
+  <div class="sheet-box">
+    <header><h2>Add photos and videos</h2><button class="iconbtn" id="upClose" aria-label="Close"><i data-ic="x"></i></button></header>
+    <div class="up-drop">
+      <p class="up-lead">Drop files anywhere on the page, or choose them here.</p>
+      <div class="btnrow"><button class="btn primary" id="upPick">Choose files</button><button class="btn" id="upFolder">Choose a folder</button><label class="ctl">Add to <select id="upSpace" class="inp"></select></label></div>
+      <input type="file" id="upFiles" multiple accept="image/*,video/*,.heic,.heif,.tif,.tiff,.mkv,.avi" hidden><input type="file" id="upDir" webkitdirectory multiple hidden>
+      <ol class="up-steps"><li>The original is stored untouched.</li><li>Date, place and camera are read from the file.</li><li>A display copy and a thumbnail are made in WebP.</li><li>A file that is already in the library is skipped.</li></ol>
+      <p class="vi-note" id="upLimit"></p>
+    </div>
+    <p class="up-progress" id="upProgress" role="status" hidden></p>
+    <ul class="up-list" id="upList"></ul>
+  </div>
+</div>
+
+<div class="overlay sheet" id="keys" hidden role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div class="sheet-box narrow">
+    <header><h2>Keyboard shortcuts</h2><button class="iconbtn" id="keysClose" aria-label="Close"><i data-ic="x"></i></button></header>
+    <dl class="kv keys">
+      <dt><kbd>/</kbd></dt><dd>Search</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Close what is open, or clear the selection</dd>
+      <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Previous and next</dd>
+      <dt><kbd>F</kbd></dt><dd>Like the open photo</dd>
+      <dt><kbd>E</kbd></dt><dd>Edit a copy of the open photo</dd>
+      <dt><kbd>Z</kbd></dt><dd>Zoom into the original, and back</dd>
+      <dt><kbd>Space</kbd></dt><dd>Play or pause a video</dd>
+      <dt><kbd>Shift</kbd> + click</dt><dd>Select a range in the grid</dd>
+      <dt><kbd>Ctrl</kbd> or <kbd>⌘</kbd> + <kbd>A</kbd></dt><dd>Select everything shown</dd>
+    </dl>
+  </div>
+</div>
+</div>
+
+<div class="bootwait" id="bootWait"><svg viewBox="6 14 82 62" aria-hidden="true">{{MARK}}</svg><p>Opening your library</p></div>
+
+<!-- first-run setup, sign-in, invites and password resets -->
+<div class="gate" id="gate" hidden>
+  <div class="gate-brand">
+    <svg class="gate-mark" viewBox="6 14 82 62" aria-hidden="true">{{MARK}}</svg>
+    <p class="gate-name">ImageStoria</p>
+    <p class="gate-line">Your photos, kept whole.</p>
+  </div>
+  <section class="gate-card" id="gateCard" aria-live="polite"></section>
+</div>
+
+<div class="dropzone" id="dropzone" hidden><p>Drop to add to your library</p></div>
+<div id="toasts" aria-live="polite"></div>
+<noscript><p style="padding:40px;font:16px system-ui">ImageStoria needs JavaScript to run.</p></noscript>
+
+<script src="/assets/maplibre-gl.js?v={{V}}"></script>
+<script src="/assets/app.js?v={{V}}"></script>
+</body>
+</html>

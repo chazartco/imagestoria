@@ -1,0 +1,9 @@
+.git
+.env
+node_modules
+dist
+data
+test/tmp
+test/shots
+*.log
+.DS_Store

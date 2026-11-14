@@ -1,0 +1,7 @@
+.venv/
+worker.toml
+worker.log*
+models/
+bench*/
+__pycache__/
+*.egg-info/

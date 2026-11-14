@@ -1,0 +1,62 @@
+# ImageStoria worker settings. Copy this file to worker.toml and fill in the first two lines.
+
+# The address of your ImageStoria, as you type it in a browser.
+site = "https://photos.example.com"
+# The token for this machine: People and settings, Workers, Make a token. It is shown once.
+token = "PASTE-THE-TOKEN-HERE"
+
+# What this machine does. caption: a caption, the scene, what is in the picture, and readable text.
+# embed: search by meaning and near duplicates. faces: people. place: a guess at where a picture with no location was taken.
+# All four is the recommended setup. Leave one out if this machine should not do it.
+tasks = ["caption", "embed", "faces", "place"]
+
+# How many items to take at a time. Each is handed in as soon as it is read.
+batch = 4
+# How long to wait before asking again when there is nothing to do, in seconds.
+idle_seconds = 60
+# Work only between these times, on this machine's clock, such as "22:00-07:00". Empty means any time.
+hours = ""
+# One line is written here for every item. Empty writes to the screen only.
+log = "worker.log"
+# Where downloaded models for embed and faces are kept.
+models_dir = "models"
+
+[vision]
+# Any server that speaks the OpenAI chat API on this machine: Ollama, the llama.cpp server, or vLLM.
+endpoint = "http://127.0.0.1:11434/v1"
+# The model to use. Changing models is this one line. Then press "Read everything again" on the site if you want old pictures redone.
+# qwen3.5:9b-q4_K_M is the recommended one: on a real library it named what was in the pictures best.
+model = "qwen3.5:9b-q4_K_M"
+# Only if your model server asks for a key.
+api_key = ""
+# Pictures are made this many pixels on their long side before the model sees them.
+max_edge = 1024
+# Seconds to wait for one answer.
+timeout = 180
+# The longest answer the model may give, in tokens. It stops a model that has started repeating itself.
+max_tokens = 700
+
+# Extra fields sent with every request. Most current vision models "think" before they answer unless told not to.
+# For describing a picture that makes them several times slower, and now and then they think until they run out
+# of room and answer nothing. This turns it off. Remove the line if your model server refuses the field.
+[vision.extra]
+reasoning_effort = "none"
+
+[embed]
+# The image and text model for search by meaning. The site must use the same one (EMBED_MODEL in its settings).
+model = "onnx-community/siglip2-base-patch16-224-ONNX"
+file = "onnx/vision_model.onnx"
+device = "auto"
+
+[faces]
+# "open": YuNet and AuraFace, with licences that allow any use.
+# "insightface": the InsightFace buffalo_l pack. More accurate, and for non-commercial research use only.
+models = "open"
+# Faces smaller than this many pixels on their shorter side are skipped, and so are blurred ones.
+min_size = 40
+min_score = 0.6
+min_sharpness = 80.0
+max_faces = 40
+device = "auto"
+# Read faces from the original file ("orig") or from the 1600 px copy ("display").
+source = "orig"
