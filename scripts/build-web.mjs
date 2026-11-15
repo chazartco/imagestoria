@@ -19,7 +19,7 @@ fs.mkdirSync(path.join(assets, 'fonts'), { recursive: true });
 // 1. Scripts. The develop pipeline is shared with the server, so its "export" keywords are dropped here.
 // The looks are shared too (the contact sheet script reads them), and are joined on after it.
 const shared = ['develop', 'looks', 'scenes'].map((n) => read(path.join(root, `src/shared/${n}.js`)).replace(/^import .*$/gm, '').replace(/^export /gm, '')).join('\n\n');
-const order = ['core', 'api', 'img', 'library', 'viewer', 'map', 'locate', 'dates', 'stories', 'picker', 'share', 'editor', 'upload', 'admin', 'trash', 'people', 'app'];
+const order = ['core', 'api', 'img', 'library', 'viewer', 'map', 'locate', 'dates', 'stories', 'picker', 'share', 'public', 'editor', 'upload', 'admin', 'trash', 'people', 'app'];
 const js = [`/* ImageStoria. Built ${new Date().toISOString().slice(0, 10)}. Source: src/web/js and src/shared. */`, shared, ...order.map((n) => read(path.join(src, 'js', `${n}.js`)))].join('\n\n');
 fs.writeFileSync(path.join(assets, 'app.js'), js);
 

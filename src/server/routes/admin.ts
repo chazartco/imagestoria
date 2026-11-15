@@ -88,7 +88,15 @@ export function registerAdmin(app: FastifyInstance, ctx: Ctx) {
     const set: Partial<typeof users.$inferInsert> = {};
     if (b.name) set.name = b.name;
     if (b.role && b.role !== u.role) { set.role = b.role; set.caps = {}; }
-    if (b.caps) { const next: Record<string, boolean> = { ...(set.caps ?? u.caps) }; for (const c of ADJUSTABLE) if (c in b.caps) next[c] = b.caps[c]!; set.caps = next; }
+    if (b.caps) {
+      const next: Record<string, boolean> = { ...(set.caps ?? u.caps) }; for (const c of ADJUSTABLE) if (c in b.caps) next[c] = b.caps[c]!;
+      // "Publish stories" is a switch for editors only. An owner always may, and a commenter or viewer never.
+      if ('publish' in b.caps) {
+        if (b.caps.publish && (b.role ?? u.role) !== 'editor') throw bad('Only an editor can be allowed to publish stories. An owner always can.');
+        if (b.caps.publish) next.publish = true; else delete next.publish;
+      }
+      set.caps = next;
+    }
     if (b.status && u.status !== 'pending') set.status = b.status;
     if (Object.keys(set).length) await db.update(users).set(set).where(eq(users.id, u.id));
     if (b.spaceIds) await setSpaces(u.id, b.spaceIds);

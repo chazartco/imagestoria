@@ -319,6 +319,105 @@ says the file's version is not supported, run the restore from the app container
 docker compose run --rm -T app sh -c 'pg_restore --clean --if-exists --no-owner -d "$DATABASE_URL"' < afterimage.dump
 ```
 
+## Public stories
+
+A library is private. A story can be made public, one story at a time, and then anyone can read it at the
+library's own address without signing in.
+
+- **Publish a story**: open it, choose Share, and turn on Public. There you also choose whether it is the
+  featured story, whether visitors may download the originals (off unless you turn it on), and the name in
+  its address. The name is made from the title the first time and stays the same when the title changes.
+- **Who may publish**: owners. An editor may once an owner ticks "Publish stories" on that person's card in
+  People and settings. Commenters and viewers never can.
+- **What a visitor sees**: at `/p`, and at the library's address itself when they are not signed in, the public
+  page: its title and one line of text, the featured story open to read and to play as a slideshow, and the
+  other public stories as covers under it. With no featured story the newest public one is shown open. Each
+  public story also has its own address, `/p/<name>`. A "Sign in" link leads to the sign-in page as always.
+  With no public story the address is the sign-in page, exactly as before.
+- **What a visitor gets**: the same as with a share link and nothing more. The story's title and text, its
+  pictures as thumbnails and display copies, a video's file to play, and the town a picture was taken in. No
+  tags, descriptions, comments, camera details, exact locations, names of people or faces, and no file names
+  or originals unless downloads are on. A picture is reachable only through a public story it is in. Taking
+  the story off the public page, taking the picture out of the story, or putting it in the trash ends that at once.
+- **Your name and logo**: in People and settings, the Public page card has a Name, which is shown at the top left
+  in place of "Stories", a Line under it, and a Logo beside it. The logo is a PNG, SVG, JPEG or WebP of up to
+  10 MB. It is shown whole, in its own shape, 44 pixels high, and is never enlarged.
+- **Search engines**: off unless you turn it on. The same card has "Let search engines list it". While it is off every public page says `noindex, nofollow`,
+  `robots.txt` disallows everything, and a link to a story shows no preview. With it on, `robots.txt` allows `/p`
+  only, and a shared link shows the story's title, introduction and first cover picture.
+- **Cost**: visitors load the pictures from the library's own storage. If that is a bucket, the provider may bill
+  for what they load.
+
+Publishing does not make or change a share link, and a share link does not make a story public.
+
+## Move a library
+
+A library can move from the hosted service to a server of your own, and back. It moves in two parts: an
+**export**, which is one file with everything in the database, and the **pictures**, which are files in storage
+and are not in the export.
+
+### The export
+
+In People and settings, the owner opens "Move this library" and chooses Export now. The file is written into the
+library's own storage under `exports/` (the newest three are kept) and can be downloaded from the same window.
+From the command line: `docker compose exec app npm run library:export -- /data/library.jsonl.gz`.
+
+The file is gzip. Its first line says what it is, and every other line is one row. It is not a database dump
+and cannot carry commands, so it is safe to read on a server that many libraries share.
+
+It holds: spaces, people (with their password hashes, so they can still sign in, and which spaces they open),
+items and their edits, tags, likes, comments, stories with their sections, covers and share links, which stories
+are public and at what address, reels, music, looks, what was read from the pictures (captions, labels,
+embeddings, tasks), people in the pictures (persons, faces, rejections), place suggestions, the activity log,
+and three settings: automatic naming of faces (`faces:auto`), the public page (`public:site`), and the Cloud AI
+choices (`cloudai`) **without the key and switched off**.
+
+It never holds: sessions, invite and reset links, work that was in line, workers and their tokens (they point
+at the old address), the Cloud AI key or anything else sealed with `SECRETS_KEY`, today's count of pictures
+sent to a provider, the list of backups, who the subscriber of a hosted library is, and the GeoNames place
+names (fetch them again with "Fetch the place names").
+
+### The import
+
+In the same window, choose the export file, or type the name of a file that is already in `exports/` in this
+library's storage (for a file too large to upload). From the command line:
+`docker compose exec app npm run library:import -- /data/library.jsonl.gz` (add `--replace` when the library
+already has pictures; `npm run import` is the older command that brings in a folder of photos).
+
+- The file is checked before anything changes: that it is an export, that it was not made by a newer
+  ImageStoria ("Update this server first"), that it is whole, and that it names only tables and columns this
+  server knows. Anything else is refused.
+- An import **replaces** the library. A library that already has pictures asks you to type the word replace,
+  and a backup of its database is made first. If the backup fails, nothing is changed.
+- Everything is loaded in one step. If anything fails, the library is exactly as it was.
+- Files in storage are not touched. Afterwards the window says whether the pictures are there, from a look at
+  up to 200 of them.
+- Everyone is signed out except the person who did the import, who stays an owner and keeps the password they
+  have on this server. On a server of your own the other people come across as they were. On the hosted
+  service the subscriber becomes an owner, the owners of the imported library stay owners, and the subscriber's
+  password is never taken from the file.
+- Workers and the Cloud AI key belong to a server, so connect them again after a move.
+- Wait for uploads to finish processing before you export. An item that was still being processed arrives
+  that way and stays that way.
+
+### The pictures
+
+- **From the hosted service to your own server**: nothing to copy. Point your server at the same Space
+  (`STORAGE_DRIVER=s3` with the same `S3_BUCKET` and `S3_PREFIX`, see "Files in DigitalOcean Spaces"), start it,
+  create the owner account, and import. From then on two libraries read the same files: a picture deleted for
+  good in one is gone for the other, so close the one you moved away from.
+- **From your own server with pictures on its disk to the hosted service**: copy the `media` folder into your
+  Space first, then import there. On your server, with the Space's `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`,
+  `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` and `S3_PREFIX` set (leave `STORAGE_DRIVER` as it is):
+
+  ```sh
+  docker compose exec app npm run media:push
+  ```
+
+  It copies every file under the media folder, skips the ones already there with the same size, and prints how
+  far it is. If it stops, run it again. `npm run media:pull` does the reverse: it brings every file in the
+  bucket into the media folder, for moving from a bucket to a disk. Neither deletes anything.
+
 ## Work on it
 
 The worker in `worker/` is a separate Python program with its own README and tests.

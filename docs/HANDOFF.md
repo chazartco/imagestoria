@@ -608,6 +608,104 @@ Nearly every located item got a finer name. A lookup is about 1 ms.
 libraries from pip (embedding 60 ms and faces 86 ms a picture while the bench was using the same GPU).
 The environment is 1.9 GB.
 
+## Moving a library, and public stories
+
+Two things added in November 2026. Both were built in the hosted product's repository first and carried here,
+without the parts that only a host of many libraries needs.
+
+### Export and import of a whole library
+
+**What was built.** `src/server/portable.ts` writes a library to one gzip file and reads one back.
+The first line is a manifest (format, version, app version, the newest migration, counts per table,
+where the files were). Every other line is one row, `{ t, r }`, in an order that satisfies foreign keys.
+It is written through a cursor inside one read-only snapshot, 500 rows at a time, and read line by line,
+so the size of the library does not matter. Times are text with microseconds (`taken_at` without a zone),
+bytes are base64. It is not a database dump on purpose: a dump can carry SQL and must never be restored
+on the shared host.
+
+The tables and columns an export may hold come from the Drizzle schema, in the list at the top of that
+file. A new table travels only when it is added there. Left out always: sessions, tokens, jobs, workers,
+place_names, and every setting except `faces:auto`, `public:site` and `cloudai` (which travels without its
+key and switched off). A task a worker was holding is written as waiting, and a reel that was being made
+as failed, because the worker and the job stay behind.
+
+An import checks the whole file first without touching the database (format, version, a schema no newer
+than this server's, known tables, known columns, the kind of every value, the counts), then loads it in one
+transaction on one connection: delete the library's tables children first, insert in batches with bound
+parameters, fix up who owns it, commit. Table and column names in the SQL are this server's own, never the
+file's. A library that has items needs `replace` and the typed word, and `runBackup` runs first. Workers of
+this server are kept. The `cloudai` setting is the hosted product's and is carried so that a library can go
+there and back. Nothing here reads it.
+
+Who owns it afterwards: the person importing stays an owner with the password they have here (matched to
+an imported person by email, or put back if the export does not know them). An owner
+who comes from the hosted service has no password in the file, because that one is kept by the main site:
+`library:import` prints a one-time reset link for them.
+
+Routes are in `routes/portable.ts`, the page is the "Move this library" card in `admin.js`. Exports live
+under `exports/` in the library's storage, the newest three, listed in `export:list` with progress in
+`export:state`. `Storage` has a new `exists(key)`. The command line has `library:export`, `library:import`
+(`import` was already taken by the folder importer), `media:push` and `media:pull`.
+
+**Verified** by `test/export.test.ts` against real Postgres: a round trip between two servers with a HEIC,
+an edited copy, tags (one of them SQL), likes, comments, a story with sections, covers, a share link with
+a password, a published story, a person with a named face, an embedding and a corrected caption, compared
+through the API and row by row; `taken_at` to the microsecond; what stays behind; owner only on every route;
+thirteen kinds of refusal each leaving the library unchanged; a failure half way rolled back; the typed word
+and the backup; the command line; `media:push` and `media:pull` against `s3rver`.
+
+In a browser (Playwright, November 2026): an export made from the "Move this library" window, the file looked
+into, an import refused without the typed word, and an import through the window that put a changed library
+back exactly as it was.
+
+**Not verified.** A real Space or AWS (only `s3rver`). A large library: the code
+streams, but the largest export made was a few items, so no timing and no memory figure. A multi-gigabyte
+upload of an export through a reverse proxy. An export made while uploads are still processing arrives with
+those items stuck at "processing", because their jobs are not carried: the README says to wait.
+
+### Public stories
+
+**What was built.** Four columns on `stories` (`public`, `featured`, `public_download`, `slug`) in
+migration `0014_public_stories`. A `publish` capability beside the others: owners always, an editor only
+when `caps.publish` is true, nobody else whatever the database says (`effectiveCaps`), and the server
+refuses to set it for a commenter or viewer. `PATCH /api/stories/:id/public` does the publishing. Featured
+is one per library, set and cleared by one statement.
+
+What a visitor gets is not a second serialiser. `routes/share.ts` now exports `visitorStory`,
+`sendStoryFile` and `sendStoryMusic`, and both the share link routes and `routes/public.ts` call them.
+A test compares the two answers for the same story and they are equal. The public routes are
+`/api/public`, `/api/public/stories/:slug` and its `files` and `music`, all rate limited. A slug that is
+unknown, a story that was never published and one that was unpublished give the same 404 with the same words.
+
+The pages `/p` and `/p/<slug>` are the ordinary front end, served by `app.ts` with a different `<head>`:
+the built page carries `noindex, nofollow`, and that line is taken out, and Open Graph tags put in
+(escaped), only when the owner turned "Let search engines list it" on. `robots.txt` follows the same switch.
+The preview picture is `/p/<slug>/cover` so that it sits under the one path `robots.txt` allows. In the
+browser, `public.js` reuses the share reader: `S.share.base` is where the story's files come from, and
+`Public.frame` adds the library's title above the reader and the other stories' covers under it. At `/`
+a visitor who is not signed in gets the public page when `bootstrap.public` is true, and the sign-in page
+at `/?signin=1`.
+
+The owner's own name and logo for the public page are in `public:site` (`title`, `line`, `logo`). The logo is
+sent to `POST /api/admin/public/logo`, fitted inside 480 by 240 without enlarging, kept as WebP at
+`public/logo-<hex>.webp` in the library's storage, and answered by `GET /api/public/logo` only while
+something is published. The old file is removed when a new one is saved or the logo is taken off.
+
+**Verified** by `test/public.test.ts`: nothing public by default, publishing, the exposed shape key by key
+against a picture with a tag, description, comment, location, camera, named person and caption, file access
+of every kind, trash, removal from the story, unpublishing, the capability for each role, featured, slugs,
+robots header, meta, `robots.txt` and Open Graph tags off and on with a title full of quotes and angle
+brackets, rate limit headers, and the name and logo (whole, never enlarged).
+
+In a browser (Playwright, November 2026), at desktop and phone width: the public page as a visitor with the
+name and logo, the Public part of the Share sheet, the "Public page" window, no cropped, rounded or squeezed
+picture, and that a visitor reaches nothing private.
+
+**Not verified.** `test/e2e.mts` was not extended and not run for
+this work. How a real crawler or a link preview service treats the tags. Whether the host's own front door
+should answer `robots.txt` for the main site is not part of this. The "newest" public story is the newest
+made, not the most recently published: there is no column for when a story was published.
+
 ## Rules that are not negotiable
 
 These came from the owner and the code is built around them.
@@ -618,8 +716,10 @@ These came from the owner and the code is built around them.
   only as a deliberate edit, and an edit is saved as a copy.
 - **Originals are never modified.** Uploads are stored byte for byte. Edits create a new item.
 - **No "Load more" buttons.** Grids draw rows as they scroll into view.
-- **Private by default.** Signed-in people only, no public bucket objects. The one exception, added
-  later at the owner's request, is a story shared with a public link.
+- **Private by default.** Signed-in people only, no public bucket objects. There are two exceptions, both
+  added later at the owner's request and both about one story at a time: a story shared with a public
+  link, and a story that is published on the library's public page. Both answer through the same two
+  functions in `routes/share.ts`. There is no third way in.
 - **Nothing hard-coded to one person's setup.** Names of spaces, sign-in provider, storage and map all
   come from settings or the database.
 - **Plain writing.** Interface text and docs use short sentences, sentence case, and no em dashes.
@@ -776,6 +876,17 @@ No sign-in, for a visitor with a public link:
 GET    /share/:token                   the story, or { locked: true }
 POST   /share/:token/unlock            { password }
 GET    /share/:token/files/:id/:kind   GET /share/:token/music   POST /share/:token/upload
+
+No sign-in, for anyone, published stories only (outside /api: GET /p, /p/:slug, /p/:slug/cover, /robots.txt):
+GET    /public                         the front page: the featured or newest story open, the others as covers
+GET    /public/stories/:slug           one published story
+GET    /public/stories/:slug/files/:id/:kind   GET /public/stories/:slug/music
+PATCH  /stories/:id/public             { public, featured, allowDownload, slug }   needs the publish capability
+GET    /admin/public   PUT /admin/public { title, line, index }
+
+GET    /admin/exports   POST /admin/export { wait }   GET /admin/exports/:name
+POST   /admin/import[?replace=1&confirm=replace]       multipart: file
+POST   /admin/import/from-storage      { name, replace, confirm }
 
 GET    /people   POST /people/invite   POST /people/:id/link   PATCH /people/:id   DELETE /people/:id
 POST   /spaces   PATCH /spaces/:id   DELETE /spaces/:id   POST /spaces/order { ids }

@@ -36,7 +36,7 @@ export const users = pgTable(
     passwordHash: text('password_hash'),
     /** owner | editor | commenter | viewer */
     role: text('role').notNull().default('viewer'),
-    /** Per-person switches on top of the role: upload, edit, tag, comment, download. */
+    /** Per-person switches on top of the role: upload, edit, tag, comment, download, and for an editor, publish. */
     caps: jsonb('caps').$type<Record<string, boolean>>().notNull().default({}),
     color: text('color').notNull().default('#ffb224'),
     /** A profile picture the person chose: where its small square copy is stored. Empty shows their initial instead. */
@@ -276,9 +276,20 @@ export const stories = pgTable('stories', {
   groups: text('groups').array().notNull().default(sql`'{}'::text[]`),
   /** The music that plays under the slideshow and in reels: "builtin:<name>", a music_tracks id, or empty for none. */
   music: text('music'),
+  /**
+   * Published: anyone may read this story at the library's own address, /p/<slug>, without signing in.
+   * This is the second exception to "signed-in people only" (the first is a share link). Off by default.
+   */
+  public: boolean('public').notNull().default(false),
+  /** The story shown open on the public front page. At most one per library. */
+  featured: boolean('featured').notNull().default(false),
+  /** Visitors to the public page may download the originals. */
+  publicDownload: boolean('public_download').notNull().default(false),
+  /** The name in the public address. Made from the title when first published, and kept when the title changes. */
+  slug: text('slug'),
   createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   createdAt: createdAt(),
-});
+}, (t) => [uniqueIndex('stories_slug_uq').on(t.slug)]);
 
 /**
  * Sections the author made by hand. A story with no rows here arranges itself by date, as every story
@@ -318,7 +329,7 @@ export const storyItems = pgTable(
 /**
  * Public links to a story. Anyone who has the link can open the story without signing in, within what
  * the link allows. A story can have several, each with its own options. Deleting the row ends the link.
- * This is the one exception to "signed-in people only".
+ * This is one of the two exceptions to "signed-in people only". The other is a published story (stories.public).
  */
 export const storyLinks = pgTable(
   'story_links',

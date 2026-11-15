@@ -47,9 +47,19 @@ After changing anything in `src/web` or `src/shared`, run `npm run build:web`. T
 - No "Load more" buttons. Draw what is on screen as it scrolls.
 - A blurred backdrop behind a picture (the slideshow, reels) may be cut to fill the frame. The picture
   itself, on top of it, is always whole.
-- Private by default: signed-in people only, no public bucket objects. The one exception is a story
-  that its owner or an editor shares with a public link (`src/server/routes/share.ts`). A link reaches
-  that one story and nothing else, and deleting the link ends it. Do not add any other way in.
+- Private by default: signed-in people only, no public bucket objects. There are two exceptions, both
+  about one story at a time, and no others:
+  1. A story that its owner or an editor shares with a public link (`src/server/routes/share.ts`). A link
+     reaches that one story and nothing else, and deleting the link ends it.
+  2. A story that is published (`stories.public`, `src/server/routes/public.ts`). Anyone can read it at the
+     library's own address, `/p` and `/p/<slug>`, and at `/` when nobody is signed in. Only an owner, or an
+     editor the owner gave the `publish` switch, can publish. Unpublishing ends it at once.
+  Both answer through the same two functions in `share.ts` (`visitorStory`, `sendStoryFile`), which decide
+  everything that leaves the library this way: the story's own pictures as thumb and display copies, a
+  video's playable file, originals only when downloads are allowed, and no tags, descriptions, comments,
+  camera details, exact coordinates, names of people or faces. Change what a visitor sees there and
+  nowhere else. Do not add any other way in, and do not add a route that reads anything but a shared or
+  published story without a session.
 - Nothing specific to one install in the code. Use settings (`src/server/config.ts`, `.env.example`) or the database.
 - The server enforces every permission. Hiding a button is not a permission.
 - Every route that changes something needs the `x-afterimage: 1` header (handled by `api()` in `src/web/js/core.js`).
@@ -62,4 +72,8 @@ After changing anything in `src/web` or `src/shared`, run `npm run build:web`. T
 - Face embeddings are biometric data. No route returns one, nothing logs one, and they are deleted with
   the item, the person, or the space's recognition switch. Names of people are for the owner and editors.
 - A suggestion (a person's name, a place) is never stored as fact until a person accepts it.
+- A library moves between servers as an export the app writes and reads itself (`src/server/portable.ts`),
+  never as a database dump: a dump can carry any SQL. An export is untrusted when it is read. A new table or
+  column travels only when it is in the list in that file, and what must stay behind (sessions, tokens, jobs,
+  workers, and the hosted service's own settings) stays out of it.
 - Add a test with every change in behavior. Server tests live in `test/*.test.ts`, browser checks in `test/e2e.mts`.

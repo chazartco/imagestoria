@@ -7,6 +7,7 @@ import {
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -42,6 +43,8 @@ export interface Storage {
   /** A short-lived direct link, or null when files must be streamed through the app. */
   signedUrl(key: string, opts: { downloadName?: string; contentType?: string }): Promise<string | null>;
   remove(keys: string[]): Promise<void>;
+  /** Whether a file is there, without fetching it. */
+  exists(key: string): Promise<boolean>;
   /** Fails loudly at startup if the folder or bucket is not usable. */
   check(): Promise<void>;
 }
@@ -88,6 +91,9 @@ export class LocalStorage implements Storage {
   }
   async remove(keys: string[]) {
     await Promise.all(keys.map((k) => fsp.rm(this.file(k), { force: true })));
+  }
+  async exists(key: string) {
+    try { return (await fsp.stat(this.file(key))).isFile(); } catch { return false; }
   }
   async check() {
     await fsp.mkdir(this.root, { recursive: true });
@@ -168,6 +174,10 @@ export class S3Storage implements Storage {
         new DeleteObjectsCommand({ Bucket: this.bucket, Delete: { Objects: batch.map((k) => ({ Key: this.k(k) })), Quiet: true } }),
       );
     }
+  }
+  async exists(key: string) {
+    try { await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: this.k(key) })); return true; }
+    catch (e: any) { if (e?.name === 'NotFound' || e?.name === 'NoSuchKey' || e?.$metadata?.httpStatusCode === 404) return false; throw e; }
   }
   async check() {
     await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));

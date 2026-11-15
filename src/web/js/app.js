@@ -105,6 +105,8 @@ function meMenu(btn) {
   list.append(el('div', { class: 'me-h' }, avatarEl(u), el('div', {}, el('b', { text: u.name }), el('small', { class: 'muted', text: ` ${u.email || u.handle || ''}` }), el('p', { class: 'muted me-role', text: ROLE_NOTE[u.role] }))));
   list.append(el('hr'), el('button', { class: 'mi', html: icon('sun', 16) + `<span>${S.theme === 'dark' ? 'Light' : 'Dark'} theme</span>`, onclick: () => { setTheme(S.theme === 'dark' ? 'light' : 'dark'); closePop(); } }));
   if (can('admin')) list.append(el('button', { class: 'mi', html: icon('people', 16) + '<span>People and settings</span>', onclick: () => { closePop(); go('admin'); } }));
+  /* what a visitor sees, once something is published */
+  if (S.cfg.public || S.stories.some(s => s.public)) list.append(el('a', { class: 'mi', id: 'mePublic', href: '/p', target: '_blank', rel: 'noopener', html: icon('link', 16) + '<span>Public page</span>' }));
   if (S.cfg.auth.local) list.append(el('button', { class: 'mi', html: icon('eye', 16) + `<span>${u.hasPassword ? 'Change password' : 'Set a password'}</span>`, onclick: () => { closePop(); passwordSheet(); } }));
   if (sso && !u.oidcLinked) list.append(el('button', { class: 'mi', html: icon('link', 16) + `<span>Connect ${esc(sso.name)}</span>`, onclick: () => { location.href = '/api/auth/oidc/start?link=1'; } }));
   list.append(el('button', { class: 'mi', html: icon('book', 16) + '<span>Keyboard shortcuts</span>', onclick: () => { closePop(); $('#keys').hidden = false; } }));
@@ -239,6 +241,13 @@ async function boot() {
   if (b.setupNeeded) return Gate.setup();
   if (q.get('reset')) return Gate.link(q.get('reset'));
   if (!b.me && q.get('invite')) return Gate.link(q.get('invite'), q.get('auth_error'));
+  /* Published stories: /p and /p/<name> show the public page to anyone. So does the library's own address when nobody is signed in
+     and something is published. "Sign in" on that page leads here with ?signin=1, which shows the sign-in page as always. */
+  const pub = /^\/p(?:\/([a-z0-9-]{1,80}))?\/?$/.exec(location.pathname);
+  if (pub || (!b.me && b.public && location.pathname === '/' && !q.get('signin') && !q.get('auth_error'))) {
+    if (await Public.boot(pub ? pub[1] || null : null, !!b.me)) return;
+    if (pub) history.replaceState(null, '', '/');
+  }
   if (!b.me) return Gate.signin(q.get('auth_error'));
   const linked = q.get('linked'), err = q.get('auth_error'); if (location.search) clean();
   try { await Promise.all([Sync.full(), Stories.load()]); }

@@ -20,6 +20,7 @@ import {
 import { type Ctx, HttpError, bad } from '../context.js';
 import sharp from 'sharp';
 import { sendStored } from './items.js';
+import { hasPublic } from './public.js';
 import { schema } from '../db/index.js';
 
 const OIDC_COOKIE = 'afterimage_oidc';
@@ -70,6 +71,8 @@ export function registerAuth(app: FastifyInstance, ctx: Ctx) {
       limits: { maxUploadMb: cfg.MAX_UPLOAD_MB, displayLongEdge: cfg.DISPLAY_LONG_EDGE, thumbHeight: cfg.THUMB_HEIGHT },
       storage: cfg.STORAGE_DRIVER,
       musicVersion: MUSIC_VERSION,
+      // Whether any story is published: a visitor who is not signed in then gets the public page instead of the sign-in page.
+      public: await hasPublic(ctx),
     };
     if (!req.user) return { ...base, me: null };
     const people = await db

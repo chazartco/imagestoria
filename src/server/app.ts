@@ -6,7 +6,7 @@ import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { ZodError } from 'zod';
 import { loadUser } from './auth/core.js';
 import type { Config } from './config.js';
@@ -25,6 +25,8 @@ import { registerWorker } from './routes/worker.js';
 import { registerSearch } from './routes/search.js';
 import { registerFaces } from './routes/faces.js';
 import { registerPlaces } from './routes/places.js';
+import { publicHead, registerPublic } from './routes/public.js';
+import { registerPortable } from './routes/portable.js';
 import { EmbedIndex, makeTextEmbedder } from './ai/embed.js';
 import type { Storage } from './storage/index.js';
 import { startBackupSchedule } from './backup.js';
@@ -80,6 +82,8 @@ export async function buildApp(cfg: Config, db: Db, storage: Storage): Promise<{
   registerSearch(app, ctx);
   registerFaces(app, ctx);
   registerPlaces(app, ctx);
+  registerPublic(app, ctx);
+  registerPortable(app, ctx);
   app.all('/api/*', async (_req, reply) => reply.code(404).send({ error: 'No such endpoint.' }));
 
   // The front end: plain files built by scripts/build-web.mjs.
@@ -92,15 +96,29 @@ export async function buildApp(cfg: Config, db: Db, storage: Storage): Promise<{
     let plainBucket = '';
     if (cfg.STORAGE_DRIVER === 's3' && cfg.S3_ENDPOINT.startsWith('http://')) { const u = new URL(cfg.S3_ENDPOINT); plainBucket = `${u.origin} http://*.${u.host}`; }
     const csp = ["default-src 'self'", `img-src 'self' data: blob: https: ${plainMapHosts} ${plainBucket}`.replace(/\s+/g, ' ').trim(), `media-src 'self' blob: https: ${plainBucket}`.trim(), "style-src 'self' 'unsafe-inline'", "script-src 'self'", 'worker-src blob:', "child-src blob:", `connect-src 'self' https: ${plainMapHosts}`.trim(), "font-src 'self' data:", "manifest-src 'self'", "frame-ancestors 'none'", "base-uri 'self'", "form-action 'self'"].join('; ');
+    // The public page: the same front end, with a <head> that says whether search engines may list it, and a preview when they may.
+    // Every other page of the app asks search engines to stay away.
+    const shell = fs.readFileSync(path.join(webRoot, 'index.html'), 'utf8');
+    // The page as built says "noindex, nofollow". That line comes out only when the owner lets search engines list the public page.
+    const listed = shell.replace(/<meta name="robots"[^>]*>\s*/i, '');
+    const publicPage = async (reply: FastifyReply, slug: string | null) => {
+      const head = await publicHead(ctx, slug);
+      if (head.noindex) reply.header('x-robots-tag', 'noindex, nofollow');
+      return reply.header('content-security-policy', csp).header('cache-control', 'no-cache').type('text/html; charset=utf-8').send(head.noindex ? shell : listed.replace('</head>', () => `${head.tags}</head>`));
+    };
+    const open = { config: { rateLimit: { max: 240, timeWindow: '1 minute' } } };
+    app.get('/p', open, (_req, reply) => publicPage(reply, null));
+    app.get('/p/', open, (_req, reply) => publicPage(reply, null));
+    app.get('/p/:slug', open, (req, reply) => publicPage(reply, String((req.params as { slug: string }).slug)));
     await app.register(fastifyStatic, {
       root: webRoot,
       setHeaders(res, file) {
-        if (file.endsWith('index.html')) res.header('cache-control', 'no-cache').header('content-security-policy', csp);
+        if (file.endsWith('index.html')) res.header('cache-control', 'no-cache').header('content-security-policy', csp).header('x-robots-tag', 'noindex, nofollow');
         else res.header('cache-control', 'public, max-age=3600');
         if (file.endsWith('.webmanifest')) res.header('content-type', 'application/manifest+json; charset=utf-8');
       },
     });
-    app.setNotFoundHandler((req, reply) => (req.method === 'GET' && !req.url.startsWith('/api/') ? reply.header('content-security-policy', csp).header('cache-control', 'no-cache').sendFile('index.html') : reply.code(404).send({ error: 'Not found.' })));
+    app.setNotFoundHandler((req, reply) => (req.method === 'GET' && !req.url.startsWith('/api/') ? reply.header('content-security-policy', csp).header('cache-control', 'no-cache').header('x-robots-tag', 'noindex, nofollow').sendFile('index.html') : reply.code(404).send({ error: 'Not found.' })));
   } else {
     app.log.warn('No built front end found. Run "npm run build:web".');
   }

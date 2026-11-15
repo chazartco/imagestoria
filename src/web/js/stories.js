@@ -107,7 +107,7 @@ const Stories = {
       const cb = el('div', { class: 'st-cover', style: { background: `linear-gradient(135deg, ${mix(cover.palette[0], '#111214', .55)}, ${mix(cover.palette[1] || cover.palette[0], '#111214', .7)})` } });
       covers.push([cb, cov]);
       grid.append(el('button', { class: 'st-card', data: { id: s.id }, onclick: () => this.open(s.id) }, cb,
-        el('h3', { text: s.title }), el('p', { text: `${fmt.plural(items.length, 'item')}, ${this.span(items)}` }), this.places(items).length ? el('p', { class: 'muted', text: this.places(items).slice(0, 3).join(', ') }) : null, (s.groups || []).length ? el('p', { class: 'st-card-g', text: s.groups.join(', ') }) : null));
+        el('h3', { text: s.title }), s.public ? el('p', { class: 'st-pub' }, el('span', { class: 'pubmark', text: s.featured ? 'Public, featured' : 'Public' })) : null, el('p', { text: `${fmt.plural(items.length, 'item')}, ${this.span(items)}` }), this.places(items).length ? el('p', { class: 'muted', text: this.places(items).slice(0, 3).join(', ') }) : null, (s.groups || []).length ? el('p', { class: 'st-card-g', text: s.groups.join(', ') }) : null));
     });
     if (!mine.length) grid.append(el('p', { class: 'empty', text: can('edit') ? (this.group ? 'No stories in this group.' : 'No stories in this space yet. Choose “New story”, or select photos in the library and choose “Make story”.') : 'No stories have been shared with you in this space yet.' }));
     wrap.append(grid);
@@ -204,7 +204,7 @@ const Stories = {
   repaint() { const rd = $('#reader'), top = rd.scrollTop; this.paint(); rd.scrollTop = top; },
   /* where each section begins, for the player to announce */
   starts(s) { const m = new Map(); if (s.sections) this.parts(s).forEach(p => { if (p.title.trim()) m.set(p.items[0].id, p.title.trim()); }); return m; },
-  play(from, paused) { const s = this.cur; this.flush(); Player.open(this.items(s), from || 0, this.starts(s), paused, s.music ? (S.share ? `/api/share/${S.share.token}/music?v=${S.cfg.musicVersion || 0}-${encodeURIComponent(s.music)}` : Music.url(s.music)) : null); },
+  play(from, paused) { const s = this.cur; this.flush(); Player.open(this.items(s), from || 0, this.starts(s), paused, s.music ? (S.share ? `${S.share.base}/music?v=${S.cfg.musicVersion || 0}-${encodeURIComponent(s.music)}` : Music.url(s.music)) : null); },
 
   open(id) {
     const s = this.cur = S.stories.find(x => x.id === id); if (!s) return; this.mode = null;
@@ -233,7 +233,10 @@ const Stories = {
     const title = edit ? el('textarea', { class: 'rd-title', rows: 1, value: s.title, 'aria-label': 'Story title', maxlength: 200, oninput: e => { s.title = e.target.value.replace(/\n/g, ' '); autosize(e.target); $('.rd-bar-t').textContent = s.title; this.save(s, { title: s.title }); } }) : el('h1', { class: 'rd-title', text: s.title });
     const intro = edit ? el('textarea', { class: 'rd-intro', rows: 2, placeholder: 'Start the story in a sentence or two', value: s.intro, 'aria-label': 'Introduction', maxlength: 5000, oninput: e => { s.intro = e.target.value; autosize(e.target); this.save(s, { intro: s.intro }); } }) : (s.intro ? el('p', { class: 'rd-intro', text: s.intro }) : null);
     const head = el('header', { class: 'rd-head', style: { '--a': mix(cover.palette[0], '#16171a', .62), '--b': mix(cover.palette[1] || cover.palette[0], '#16171a', .8) } },
-      el('div', { class: 'rd-head-t' }, title, el('p', { class: 'rd-meta', text: `${this.span(items)}. ${fmt.plural(items.length, 'item')}${this.places(items).length ? ' from ' + this.places(items).join(', ') : ''}.` }), this.groupsRow(s, edit), intro, this.route(items)),
+      el('div', { class: 'rd-head-t' }, title, el('p', { class: 'rd-meta', text: `${this.span(items)}. ${fmt.plural(items.length, 'item')}${this.places(items).length ? ' from ' + this.places(items).join(', ') : ''}.` }), this.groupsRow(s, edit),
+        /* a published story says so, to everyone who can open it here */
+        s.public && s.slug ? el('p', { class: 'rd-pub', id: 'rdPublic' }, el('span', { class: 'pubmark', text: s.featured ? 'Public, featured' : 'Public' }), ' Anyone can read this story at ', el('a', { href: '/p/' + s.slug, target: '_blank', rel: 'noopener', text: location.origin + '/p/' + s.slug }), '.') : null,
+        intro, this.route(items)),
       el('figure', { class: 'rd-cover', id: 'rdCoverBox' }));
     if (this.mode === 'cover') rd.append(el('div', { class: 'rd-hint', id: 'rdHint' }, el('span', { text: 'Click up to four pictures for the cover. They show in the order you click them. Click a chosen one again to take it off.' }), el('button', { class: 'btn small primary', text: 'Done', onclick: () => this.setMode('cover') })));
     const body = el('div', { class: 'rd-body' }), parts = this.parts(s);
@@ -254,7 +257,9 @@ const Stories = {
       const rows = el('div', { class: 'rd-rows', data: { ch: pi } }); rows._items = part.items; sec.append(rows); body.append(sec);
     });
     rd.append(head, body, el('footer', { class: 'rd-foot' }, el('button', { class: 'btn', html: icon('play', 16) + '<span>Play this story</span>', onclick: () => this.play(0) }),
-      S.share ? el('p', { class: 'rd-shared muted', text: 'A private story, shared with you through ImageStoria.' }) : null));
+      S.share && !S.share.pub ? el('p', { class: 'rd-shared muted', text: 'A private story, shared with you through ImageStoria.' }) : null));
+    /* the public page puts the library's name above the story and the other published stories under it */
+    if (S.share && S.share.pub) Public.frame(rd);
     this.paintCover($('#rdCoverBox'), cov, true); this.rows(); $$('textarea', rd).forEach(autosize);
   },
   rows() {
@@ -372,15 +377,17 @@ const Stories = {
   /* Who can read this story. Owners and editors of the space always can. Everyone else is chosen here, one by one. */
   share() {
     const s = this.cur; if (!s || !this.mine(s)) return; this.flush();
-    const people = el('div', { class: 'sharelist', id: 'shPeople' }, el('p', { class: 'muted', text: 'Loading' })), links = el('div', { id: 'shLinks' });
+    const people = el('div', { class: 'sharelist', id: 'shPeople' }, el('p', { class: 'muted', text: 'Loading' })), links = el('div', { id: 'shLinks' }), pub = el('div', { id: 'shPublic' });
     const sheet = el('div', { class: 'overlay sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Share this story', onclick: e => { if (e.target === sheet) sheet.remove(); } },
       el('div', { class: 'sheet-box sh-box' },
         el('header', {}, el('h2', { text: 'Share this story' }), el('button', { class: 'iconbtn modal-x', id: 'shClose', title: 'Close', 'aria-label': 'Close', html: icon('x'), onclick: () => sheet.remove() })),
         el('section', { class: 'sh-sec' }, el('h3', { text: 'People' }), el('p', { class: 'vi-note', text: 'Owners and editors of this space can always read and change it. Tick anyone else who should be able to read it.' }), people),
-        links));
+        links, pub));
     document.body.append(sheet);
     api('GET', `/api/stories/${s.id}/access`).then(r => {
       people.innerHTML = '';
+      /* publishing is for owners, and for editors the owner allowed */
+      if (r.mayPublish) Public.block(pub, s, r.published);
       const rows = r.people.slice().sort((a, b) => (b.always - a.always) || a.name.localeCompare(b.name));
       rows.forEach(u => {
         const cb = el('input', { type: 'checkbox', checked: u.always || u.shared, disabled: u.always || !u.inSpace, 'aria-label': u.name, onchange: e => { const at = s.shared.indexOf(u.id); if (e.target.checked && at < 0) s.shared.push(u.id); if (!e.target.checked && at >= 0) s.shared.splice(at, 1); attempt(api('PATCH', '/api/stories/' + s.id, { shared: s.shared }), e.target.checked ? `${u.name} can now read this story` : `${u.name} can no longer read this story`).catch(() => { e.target.checked = !e.target.checked; }); } });

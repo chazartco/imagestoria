@@ -9,8 +9,9 @@ const Img = {
     if (kind === 'display') { const s = Math.min(1, this.DISPLAY_LONG / Math.max(item.w, item.h)); return [Math.round(item.w * s), Math.round(item.h * s)]; }
     return [item.w, item.h];
   },
-  /* A visitor with a public link fetches a story's pictures through that link. Everyone else is signed in. */
-  base(item) { return S.share ? `/api/share/${S.share.token}/files/${item.id}` : `/api/files/${item.id}`; },
+  /* A visitor fetches a story's pictures through the way they came in: a share link, or the published story. Everyone else is signed in.
+     A cover on the public front page belongs to another published story, and is fetched through that one (item.via). */
+  base(item) { return item.via ? `${item.via}/files/${item.id}` : S.share ? `${S.share.base}/files/${item.id}` : `/api/files/${item.id}`; },
   url(item, kind, extra) { return `${this.base(item)}/${kind === 'orig' ? 'full' : kind}${extra ? '?' + extra : ''}`; },
   /* the file a video element plays */
   /* "play" is the copy made for browsers when the video has one, and the original when it does not.

@@ -11,8 +11,8 @@ const Admin = {
   /* Escape closes the window on top first, then the page */
   esc() { if (this.modal) this.closeModal(); else this.close(); },
   async load() {
-    const [p, o, w, pd] = await Promise.all([api('GET', '/api/people'), api('GET', '/api/admin/overview'), api('GET', '/api/admin/workers'), api('GET', '/api/admin/places'), Naming.load().catch(() => { Naming.data = null; })]);
-    this.people = p.people; this.over = o; this.work = w; this.placeData = pd;
+    const [p, o, w, pd, pub, exp] = await Promise.all([api('GET', '/api/people'), api('GET', '/api/admin/overview'), api('GET', '/api/admin/workers'), api('GET', '/api/admin/places'), api('GET', '/api/admin/public'), api('GET', '/api/admin/exports'), Naming.load().catch(() => { Naming.data = null; })]);
+    this.people = p.people; this.over = o; this.work = w; this.placeData = pd; this.pub = pub; this.exp = exp;
   },
   render() {
     const box = $('#v-admin');
@@ -105,6 +105,11 @@ const Admin = {
     cards.push(this.card('trash', 'Trash', tr.n ? fmt.plural(tr.n, 'item') : 'Empty', tr.n ? `${fmt.bytes(tr.bytes)}, ${tr.days > 0 ? `removed after ${fmt.plural(tr.days, 'day')}` : 'kept until you delete them'}` : tr.days > 0 ? `Emptied after ${fmt.plural(tr.days, 'day')}` : 'Nothing is removed by itself', tr.n ? 'warn' : 'off'));
     cards.push(this.card('signin', 'Sign-in', [o.auth.local ? 'Password' : '', this.sso() || ''].filter(Boolean).join(' and ') || 'Off', 'Chosen in the server’s settings file', 'ok'));
     cards.push(this.card('mail', 'Email', o.mail.on ? 'On' : 'Off', o.mail.on ? 'Sent from ' + o.mail.from : 'Links are yours to pass on', o.mail.on ? 'ok' : 'off'));
+    {
+      const pb = this.pub, ex = this.exp, run = ex.state && ex.state.running, last = ex.list[0];
+      cards.push(this.card('publicpage', 'Public page', pb.count ? `${fmt.plural(pb.count, 'story', 'stories')} public` : 'Nothing public', pb.count ? (pb.index ? 'Search engines may list it' : 'Search engines are asked to stay away') : 'Only people who sign in see this library', pb.count ? 'ok' : 'off'));
+      cards.push(this.card('move', 'Move this library', run ? 'Exporting' : last ? 'Exported ' + fmt.ago(last.at) : 'No export yet', ex.state && ex.state.error ? 'The last export failed' : 'To a server of your own, or back', run ? 'busy' : ex.state && ex.state.error ? 'warn' : last ? 'ok' : 'off'));
+    }
     { const a = o.activity[0]; cards.push(this.card('activity', 'Recent activity', a ? fmt.ago(a.t) : 'Nothing yet', a ? `${a.who} ${a.text}` : '', null)); }
     wrap.append(this.group('Library and server', '', cards, 'adServer'));
 
@@ -136,7 +141,8 @@ const Admin = {
       const role = el('select', { class: 'inp', disabled: lone, 'aria-label': 'Role for ' + u.name }, ['owner', 'editor', 'commenter', 'viewer'].map(r => el('option', { value: r, text: r[0].toUpperCase() + r.slice(1), selected: u.role === r })));
       role.addEventListener('change', () => this.change(api('PATCH', '/api/people/' + u.id, { role: role.value }), `${u.name} is now ${role.value === 'owner' ? 'an owner' : role.value === 'editor' ? 'an editor' : 'a ' + role.value}`));
       const spaces = el('div', { class: 'fvals wrap' }, S.spaces.map(s => { const on = u.spaces.includes(s.id); return el('button', { class: 'chip' + (on ? ' on' : ''), 'aria-pressed': on, text: s.name, onclick: () => this.change(api('PATCH', '/api/people/' + u.id, { spaceIds: on ? u.spaces.filter(x => x !== s.id) : [...u.spaces, s.id] })) }); }));
-      const caps = el('div', { class: 'caps' }, [['upload', 'Upload'], ['edit', 'Edit copies'], ['tag', 'Tag and title'], ['comment', 'Comment'], ['download', 'Download']].map(([k, l]) => el('label', {}, el('input', { type: 'checkbox', checked: !!u.caps[k], disabled: owner, onchange: e => this.change(api('PATCH', '/api/people/' + u.id, { caps: { [k]: e.target.checked } })) }), l)));
+      /* "Publish stories" is offered for editors only. An owner always may, and the server refuses it for anyone else. */
+      const caps = el('div', { class: 'caps' }, [['upload', 'Upload'], ['edit', 'Edit copies'], ['tag', 'Tag and title'], ['comment', 'Comment'], ['download', 'Download'], ...(u.role === 'editor' ? [['publish', 'Publish stories']] : [])].map(([k, l]) => el('label', {}, el('input', { type: 'checkbox', checked: !!u.caps[k], disabled: owner, onchange: e => this.change(api('PATCH', '/api/people/' + u.id, { caps: { [k]: e.target.checked } })) }), l)));
       const how = [u.hasPassword ? 'a password' : '', u.oidcLinked ? sso || 'single sign-on' : ''].filter(Boolean).join(' and ');
       const state = u.status === 'pending' ? 'Invited, has not joined yet' : u.status === 'disabled' ? 'Access turned off' : [how ? 'Signs in with ' + how : '', u.last ? 'seen ' + fmt.ago(u.last) : ''].filter(Boolean).join(', ');
       const form = el('div', { class: 'ad-form' });
@@ -282,6 +288,68 @@ const Admin = {
       const act = el('ul', { class: 'act', id: 'adActivity' }); this.over.activity.forEach(a => act.append(el('li', {}, el('b', { text: a.who }), ' ' + a.text, el('span', { class: 'muted', text: ' ' + fmt.ago(a.t) }))));
       if (!this.over.activity.length) act.append(el('li', { class: 'muted', text: 'Nothing yet.' }));
       return { title: 'Recent activity', body: act };
+    },
+    /* what a visitor who is not signed in sees at this library's address */
+    publicpage() {
+      const pb = this.pub, save = (body, done) => this.change(api('PUT', '/api/admin/public', body), done);
+      const text = (id, key, ph, max, lbl) => el('input', { class: 'inp', id, value: pb[key], placeholder: ph, maxlength: max, 'aria-label': lbl, onkeydown: e => { if (e.key === 'Enter') e.target.blur(); }, onchange: e => { const v = e.target.value.trim(); if (v !== pb[key]) save({ [key]: v }, 'Saved'); } });
+      const idx = el('label', { class: 'sl-opt' }, el('input', { type: 'checkbox', id: 'adPubIndex', checked: pb.index, onchange: e => save({ index: e.target.checked }, e.target.checked ? 'Search engines may now list the public page' : 'Search engines are asked to stay away') }), 'Let search engines list it');
+      /* the logo: chosen from this device, kept whole, shown small beside the name */
+      const pick = () => { const inp = el('input', { type: 'file', accept: 'image/png,image/svg+xml,image/jpeg,image/webp', hidden: true });
+        inp.addEventListener('change', () => { const f = inp.files[0]; inp.remove(); if (!f) return; const fd = new FormData(); fd.set('file', f, f.name);
+          this.change(fetch('/api/admin/public/logo', { method: 'POST', body: fd, headers: { 'x-afterimage': '1' }, credentials: 'same-origin' }).then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'The logo could not be saved.'); return d; }), 'Logo saved'); });
+        document.body.append(inp); inp.click(); };
+      const logo = el('div', { class: 'ad-logo', id: 'adPubLogo' }, pb.logo ? el('img', { src: pb.logo, alt: 'The logo now' }) : null,
+        el('button', { class: 'btn small', type: 'button', id: 'adPubLogoPick', onclick: pick }, pb.logo ? 'Choose another' : 'Choose a picture'),
+        pb.logo ? el('button', { class: 'btn small', type: 'button', id: 'adPubLogoOff', onclick: () => this.change(api('DELETE', '/api/admin/public/logo'), 'Logo removed') }, 'Remove') : null);
+      return { title: 'Public page', body: el('div', { id: 'adPublic' },
+        el('p', { class: 'ad-p ad-lead', id: 'adPubState', text: pb.count ? `${fmt.plural(pb.count, 'story', 'stories')} ${pb.count === 1 ? 'is' : 'are'} public. Anyone can read ${pb.count === 1 ? 'it' : 'them'} at the address below without signing in. Everything else in the library stays private.` : 'Nothing is public. Someone who is not signed in sees the sign-in page. To publish a story, open it, choose Share, and turn on Public.' }),
+        el('div', { class: 'ad-form' }, ...this.row('Name', text('adPubTitle', 'title', 'Your name or a title. Shown at the top left in place of “Stories”', 120, 'Name or title of the public page')), ...this.row('Line', text('adPubLine', 'line', 'One line under the name', 300, 'One line of text under the name')),
+          ...this.row('Logo', logo, el('small', { class: 'muted', text: 'Optional. A small picture beside the name: PNG, SVG, JPEG or WebP. It is shown whole, in its own shape.' })),
+          ...this.row('Search', idx, el('small', { class: 'muted', text: pb.index ? 'Search engines may list the public page, and a link to it shows a preview.' : 'Off. Search engines are asked not to list the page, and a link to it shows no preview.' }))),
+        this.linkBox(pb.url, 'The address of the public page. The featured story is shown open there, or the newest one when none is featured.'),
+        el('p', { class: 'ad-p', text: 'Visitors load the pictures of public stories from this library’s own storage. A storage provider may bill for what they load.' }),
+        el('p', { class: 'ad-p', text: 'Owners can publish. An editor can when “Publish stories” is ticked on their card.' })) };
+    },
+    /* the whole library as one file: export it here, import it somewhere else */
+    move() {
+      const ex = this.exp, run = ex.state && ex.state.running, has = this.over.storage.items + this.over.trash.n > 0;
+      const when = t => new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+      /* while an export runs, look again every two seconds. One timer: drawing this window again starts it over. */
+      clearTimeout(this._mt);
+      if (run) this._mt = setTimeout(() => { if (this.modal !== 'move' || !this.isOpen()) return; api('GET', '/api/admin/exports').then(r => { this.exp = r; if (!(r.state && r.state.running)) { toast(r.state && r.state.error ? 'The export failed.' : 'The library is exported.'); this.paint(); } else this.paintModal(false); }, () => { }); }, 2000);
+      const now = el('button', { class: 'btn primary', id: 'adExportNow', disabled: !!run, text: run ? 'Exporting' : 'Export now', onclick: () => { now.disabled = true; now.textContent = 'Exporting'; api('POST', '/api/admin/export').then(r => { this.exp = r; if (r.state && r.state.running) this.paintModal(false); else { toast('The library is exported.'); this.paint(); } }, e => { toast(e.message); this.render(); }); } });
+      const list = el('ul', { class: 'act', id: 'adExports' });
+      ex.list.forEach(x => list.append(el('li', {}, el('b', { text: when(x.at) }), ` ${fmt.plural(x.items, 'item')}, ${fmt.bytes(x.bytes)} `, el('a', { class: 'linkbtn', href: '/api/admin/exports/' + encodeURIComponent(x.name), download: x.name, text: 'Download' }), el('small', { class: 'muted', text: ' ' + x.name }))));
+      if (!ex.list.length) list.append(el('li', { class: 'muted', text: 'No export has been made yet.' }));
+      /* import: a file from this computer, or the name of one already in the exports folder of this library's storage */
+      const file = el('input', { type: 'file', id: 'adImportFile', accept: '.gz,application/gzip', 'aria-label': 'Export file to import' });
+      const named = el('input', { class: 'inp', id: 'adImportName', placeholder: 'Or the name of a file in the exports folder of the storage', maxlength: 150, 'aria-label': 'Name of an export file in storage' });
+      const word = el('input', { class: 'inp', id: 'adImportWord', placeholder: 'Type replace', maxlength: 20, autocomplete: 'off', 'aria-label': 'Type the word replace to confirm' });
+      const out = el('div', { id: 'adImportOut' });
+      const done = r => { out.innerHTML = ''; out.append(el('p', { class: 'ad-p ad-lead', id: 'adImportDone', text: `Imported ${fmt.plural(r.items, 'item')}. ${r.sentence}` }), el('button', { class: 'btn primary', text: 'Open the imported library', onclick: () => location.replace('/') })); };
+      const fail = e => { go1.disabled = false; go1.textContent = 'Import'; out.innerHTML = ''; out.append(el('p', { class: 'ad-p ad-warn', id: 'adImportFail', text: e.message })); };
+      const go1 = el('button', { class: 'btn', id: 'adImportGo', text: 'Import', onclick: () => {
+        const f = file.files[0], name = named.value.trim(); if (!f && !name) return toast('Choose an export file, or type the name of one in storage.');
+        if (has && word.value.trim().toLowerCase() !== 'replace') { word.focus(); return toast('Type the word replace to confirm. Importing replaces everything in this library.'); }
+        go1.disabled = true; go1.textContent = 'Importing'; out.innerHTML = '';
+        if (f) {
+          const fd = new FormData(); fd.set('file', f, f.name);
+          fetch(`/api/admin/import?replace=${has ? 1 : 0}&confirm=${encodeURIComponent(word.value.trim())}`, { method: 'POST', body: fd, headers: { 'x-afterimage': '1' }, credentials: 'same-origin' }).then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'The import did not work.'); return d; }).then(done, fail);
+        } else api('POST', '/api/admin/import/from-storage', { name, replace: has, confirm: word.value.trim() }).then(done, fail);
+      } });
+      const where = ex.where === 'bucket' ? `the bucket “${ex.bucket}”` : 'this server’s media folder';
+      return { title: 'Move this library', wide: true, body: el('div', { id: 'adMove', class: 'ad-two' },
+        el('div', {}, el('h3', { text: 'Export' }),
+          el('p', { class: 'ad-p', text: `An export is one file with everything that is not a picture: people, spaces, titles, tags, comments, stories, edits, names of people in the pictures. It is kept in ${where}, under exports/, and the newest three are kept.` }),
+          run ? el('p', { class: 'ad-p ad-lead', id: 'adExportRun', text: ex.state.total ? `Exporting: ${fmt.n(ex.state.done || 0)} of ${fmt.n(ex.state.total)} rows.` : 'Exporting.' }) : null,
+          ex.state && ex.state.error ? el('p', { class: 'ad-p ad-warn', id: 'adExportFail', text: `The last export failed. ${ex.state.error}` }) : null,
+          list, el('div', { class: 'btnrow' }, now)),
+        el('div', {}, el('h3', { text: 'Import' }),
+          el('p', { class: 'ad-p', text: has ? 'Importing replaces everything in this library with what is in the export. A backup of the database is made first. The files in storage are not touched.' : 'Importing loads an export into this library. The files in storage are not touched.' }),
+          file, named, has ? el('p', { class: 'ad-p ad-warn', text: `This library has ${fmt.plural(this.over.storage.items + this.over.trash.n, 'item')}. To replace it, type the word replace.` }) : null, has ? word : null,
+          el('div', { class: 'btnrow' }, go1), out),
+        el('p', { class: 'vi-note ad-span', text: 'The export does not hold the pictures. Coming from the hosted service: point this server at the same Space (STORAGE_DRIVER=s3 with the same bucket and prefix), then import. Going to the hosted service from pictures on this disk: copy the media folder into your Space first (npm run media:push), then import there.' })) };
     },
     /* who is in the pictures: three windows that live in people.js */
     faces() { return Naming.mFaces(); },

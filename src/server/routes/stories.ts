@@ -62,7 +62,7 @@ export function registerStories(app: FastifyInstance, ctx: Ctx) {
           if (!sections.length) sections = null; else ids = sections.flatMap((x) => x.ids);
         }
         const chosen = (s.coverIds.length ? s.coverIds : s.coverItemId ? [s.coverItemId] : []).filter((c) => live.has(c));
-        return { id: s.id, space: s.spaceId, title: s.title, intro: s.intro, cover: chosen[0] ?? null, covers: chosen, notes: s.notes, sections, shared: s.sharedWith, groups: s.groups, music: s.music, by: s.createdBy, made: s.createdAt.getTime(), ids };
+        return { id: s.id, space: s.spaceId, title: s.title, intro: s.intro, cover: chosen[0] ?? null, covers: chosen, notes: s.notes, sections, shared: s.sharedWith, groups: s.groups, music: s.music, by: s.createdBy, made: s.createdAt.getTime(), ids, public: s.public, featured: s.featured, slug: s.slug };
       }),
     };
   });
@@ -179,7 +179,48 @@ export function registerStories(app: FastifyInstance, ctx: Ctx) {
         return { id: u.id, name: u.name, color: u.color, role: u.role, pending: u.status === 'pending', inSpace, always: inSpace && (u.role === 'owner' || u.role === 'editor'), shared: s.sharedWith.includes(u.id) };
       }),
       links: (await db.select().from(storyLinks).where(eq(storyLinks.storyId, s.id)).orderBy(asc(storyLinks.createdAt))).map(publicLink),
+      published: published(s), mayPublish: req.user!.caps.publish,
     };
+  });
+
+  /* ---------- publishing: the story on the library's public page ---------- */
+
+  const published = (s: typeof stories.$inferSelect) => ({ public: s.public, featured: s.featured, allowDownload: s.publicDownload, slug: s.slug, url: s.slug ? `${ctx.cfg.PUBLIC_URL}/p/${s.slug}` : null });
+  const slugOf = (t: string) => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60).replace(/-+$/, '');
+  /**
+   * Publish a story, or change how it is published. Owners always may. An editor may when the owner turned
+   * "Publish stories" on for them. Publishing never makes or changes a share link.
+   */
+  app.patch('/api/stories/:id/public', async (req) => {
+    const me = needCap(req, 'publish');
+    const s = await load(req, (req.params as any).id);
+    if (!canChange(req, s)) throw forbidden();
+    const b = z.object({ public: z.boolean().optional(), featured: z.boolean().optional(), allowDownload: z.boolean().optional(), slug: z.string().trim().min(1).max(120).optional() }).parse(req.body ?? {});
+    const on = b.public ?? s.public;
+    if (b.featured && !on) throw bad('Publish the story before you feature it.');
+    const taken = async (slug: string) => (await db.select({ id: stories.id }).from(stories).where(and(eq(stories.slug, slug), sql`${stories.id} <> ${s.id}::uuid`))).length > 0;
+    let slug = s.slug;
+    if (b.slug !== undefined) {
+      const want = slugOf(b.slug);
+      if (!want) throw bad('Use letters and numbers for the address.');
+      if (want !== s.slug && (await taken(want))) throw bad('Another story already uses that address. Choose a different one.');
+      slug = want;
+    }
+    // The address is made from the title the first time the story is published, and then stays as it is.
+    if (on && !slug) { const base = slugOf(s.title) || 'story'; slug = base; for (let i = 2; await taken(slug); i++) slug = `${base}-${i}`; }
+    const set = { public: on, featured: on ? b.featured ?? s.featured : false, publicDownload: b.allowDownload ?? s.publicDownload, slug };
+    try {
+      await db.transaction(async (tx) => {
+        // At most one featured story in the library: this one statement sets it here and clears it everywhere else.
+        if (set.featured && !s.featured) await tx.execute(sql`update stories set featured = (id = ${s.id}::uuid) where featured or id = ${s.id}::uuid`);
+        await tx.update(stories).set(set).where(eq(stories.id, s.id));
+      });
+    } catch (e: any) {
+      if ((e?.code ?? e?.cause?.code) === '23505') throw bad('Another story already uses that address. Choose a different one.');
+      throw e;
+    }
+    if (on !== s.public) await logActivity(ctx, me, on ? `published the story “${s.title}” on the public page` : `took the story “${s.title}” off the public page`);
+    return published({ ...s, ...set });
   });
 
   /* ---------- reels: the story as a video file ---------- */

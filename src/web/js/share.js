@@ -42,7 +42,7 @@ const Share = {
   token: null,
   /* called instead of the normal start when the address is /s/<token> */
   async boot(token) {
-    this.token = token; S.share = { token, can: {} }; S.cfg = { auth: {}, map: {}, limits: {} };
+    this.token = token; S.share = { token, base: '/api/share/' + token, can: {} }; S.cfg = { auth: {}, map: {}, limits: {} };
     document.body.classList.add('share-mode'); document.title = 'A story, shared with ImageStoria';
     let r;
     try { r = await api('GET', '/api/share/' + token); }
@@ -76,6 +76,7 @@ const Share = {
     addEventListener('resize', debounce(() => Stories.relayout(), 150));
     if (!S.items.length) return Gate.show(r.story.title, r.can.add ? 'There are no pictures in this story yet.' : 'There are no pictures in this story at the moment.');
     Stories.open('share');
+    return true;
   },
   /* a visitor adds their own photos, when the link allows it */
   pick() { const inp = el('input', { type: 'file', multiple: true, accept: 'image/*,video/*,.heic,.heif', hidden: true, onchange: () => { this.add([...inp.files]); inp.remove(); } }); document.body.append(inp); inp.click(); },

@@ -118,7 +118,7 @@ describe('backups of the database', { skip: !tools }, () => {
     assert.deepEqual([busy.length, ok.length], [1, 1], JSON.stringify([a, b]));
     // the lock is let go afterwards
     assert.ok('ok' in (await runBackup(app.ctx, 'three')));
-    const held = await app.pool.query(`select count(*)::int as n from pg_locks where locktype = 'advisory'`); assert.equal(held.rows[0].n, 0);
+    const held = await app.pool.query(`select count(*)::int as n from pg_locks where locktype = 'advisory' and database = (select oid from pg_database where datname = current_database())`); // this library's own: other test files hold locks of theirs meanwhile assert.equal(held.rows[0].n, 0);
   });
 
   it('keeps the reason when a backup fails, shows it, and clears it when one works again', async () => {

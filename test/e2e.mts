@@ -983,7 +983,7 @@ await step('the owner adds a person and gets an invite link', async () => {
   await S(page, 'go("admin")'); await page.waitForSelector('#adPeople .ad-person');
   // the page is a board of cards: people, spaces, people in the pictures, and the library and server. All of it fits without scrolling.
   assert.deepEqual(await page.$$eval('#v-admin .ad-gh h2', (h: HTMLElement[]) => h.map((x) => x.textContent)), ['People', 'Spaces', 'People in the pictures', 'Library and server']);
-  assert.deepEqual(await page.$$eval('#adServer .ad-card .ad-ct b', (h: HTMLElement[]) => h.map((x) => x.textContent)), ['Backups', 'Workers', 'Places', 'Video', 'Storage', 'Trash', 'Sign-in', 'Email', 'Recent activity']);
+  assert.deepEqual(await page.$$eval('#adServer .ad-card .ad-ct b', (h: HTMLElement[]) => h.map((x) => x.textContent)), ['Backups', 'Workers', 'Places', 'Video', 'Storage', 'Trash', 'Sign-in', 'Email', 'Public page', 'Move this library', 'Recent activity']);
   assert.ok(await page.evaluate(() => { const v = document.querySelector('#v-admin')!; return v.scrollHeight <= v.clientHeight + 1; }), 'the whole board is on one screen');
   assert.match(await page.textContent('#adPeople .ad-person'), /\(you\).*Owner.*All spaces/s); assert.match(await page.textContent('#adServer [data-card=mail]'), /EmailOffLinks are yours to pass on/);
   // a card opens a window over the page, and Escape closes the window before the page

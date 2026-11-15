@@ -99,6 +99,13 @@
       "when": 1794489353159,
       "tag": "0013_avatars",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794729993918,
+      "tag": "0014_public_stories",
+      "breakpoints": true
     }
   ]
 }

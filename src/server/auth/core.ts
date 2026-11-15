@@ -7,12 +7,12 @@ import { schema } from '../db/index.js';
 
 export const SESSION_COOKIE = 'afterimage_session';
 
-export type Cap = 'upload' | 'edit' | 'tag' | 'comment' | 'download' | 'del' | 'admin';
+export type Cap = 'upload' | 'edit' | 'tag' | 'comment' | 'download' | 'publish' | 'del' | 'admin';
 export const ROLES = ['owner', 'editor', 'commenter', 'viewer'] as const;
 export type Role = (typeof ROLES)[number];
 /** What each role can do before any per-person switches. Liking is open to everyone who can sign in. */
 export const ROLE_CAPS: Record<Role, Partial<Record<Cap, boolean>>> = {
-  owner: { upload: true, edit: true, tag: true, comment: true, download: true, del: true, admin: true },
+  owner: { upload: true, edit: true, tag: true, comment: true, download: true, publish: true, del: true, admin: true },
   editor: { upload: true, edit: true, tag: true, comment: true, download: true },
   commenter: { comment: true, download: true },
   viewer: {},
@@ -51,8 +51,10 @@ export const verifyPassword = (h: string, pw: string) => verify(h, pw).catch(() 
 export function effectiveCaps(role: Role, overrides: Record<string, boolean> | null | undefined): Record<Cap, boolean> {
   const base = ROLE_CAPS[role] ?? {};
   const out = {} as Record<Cap, boolean>;
-  for (const c of ['upload', 'edit', 'tag', 'comment', 'download', 'del', 'admin'] as Cap[]) out[c] = Boolean(base[c]);
+  for (const c of ['upload', 'edit', 'tag', 'comment', 'download', 'publish', 'del', 'admin'] as Cap[]) out[c] = Boolean(base[c]);
   if (role !== 'owner' && overrides) for (const c of ADJUSTABLE) if (c in overrides) out[c] = Boolean(overrides[c]);
+  // Publishing stories to the public page: owners always, an editor only when the owner switched it on for them, nobody else ever.
+  if (role === 'editor' && overrides?.publish === true) out.publish = true;
   return out;
 }
 
