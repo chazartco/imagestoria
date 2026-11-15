@@ -440,7 +440,7 @@ function removeItems(items) {
 function initLibrary() {
   const sc = $('#gridScroll'), grid = $('#grid');
   let raf = 0; sc.addEventListener('scroll', () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; Lib.window(); }); }, { passive: true });
-  let rw = 0; new ResizeObserver(() => { if (S.view !== 'library') return; const w = grid.clientWidth; if (Math.abs(w - rw) > 1) { rw = w; Lib.layout(); } }).observe(sc);
+  let rw = 0; new ResizeObserver(() => { if (S.view !== 'library') return; sc.parentNode.style.setProperty('--sbw', sc.offsetWidth - sc.clientWidth + 'px'); const w = grid.clientWidth; if (Math.abs(w - rw) > 1) { rw = w; Lib.layout(); } }).observe(sc);
   /* With a finger: hold a picture for half a second to start selecting, then tap others to add them.
      The hold only counts if the finger stays put, so scrolling never selects anything. */
   let press = null, held = 0;
@@ -473,10 +473,19 @@ function initLibrary() {
   // time ribbon: hover shows the month, press or drag jumps there
   const rb = $('#ribbon');
   const at = e => { const r = rb.getBoundingClientRect(); return clamp((e.clientY - r.top - 8) / (r.height - 16), 0, 1); };
-  let drag = false;
-  rb.addEventListener('pointermove', e => { const f = at(e), tip = $('#rbTip'); if (!tip) return; const m = Lib.monthAt(f * Lib.total); tip.textContent = m ? m.label : ''; tip.style.top = e.clientY - rb.getBoundingClientRect().top + 'px'; tip.classList.add('show'); if (drag) sc.scrollTop = f * Lib.total - sc.clientHeight / 2; });
-  rb.addEventListener('pointerdown', e => { drag = true; rb.setPointerCapture(e.pointerId); sc.scrollTop = at(e) * Lib.total - sc.clientHeight / 2; });
-  rb.addEventListener('pointerup', () => drag = false); rb.addEventListener('pointerleave', () => { const tip = $('#rbTip'); if (tip) tip.classList.remove('show'); });
+  /* It lies over the edge of the grid, so it is only there while it is of use: while the grid scrolls, while a mouse
+     is near that edge, and while it is held. A moment after the last of those it fades away. */
+  let drag = false, over = false, hideT = 0, off = 0;
+  const wake = () => { rb.classList.add('on'); clearTimeout(hideT); hideT = setTimeout(() => { if (!drag && !over) rb.classList.remove('on'); }, 1600); };
+  const noTip = () => { const tip = $('#rbTip'); if (tip) tip.classList.remove('show'); };
+  sc.addEventListener('scroll', wake, { passive: true });
+  sc.parentNode.addEventListener('pointermove', e => { if (e.pointerType === 'mouse' && sc.parentNode.getBoundingClientRect().right - e.clientX < 64) wake(); });
+  rb.addEventListener('pointerenter', () => { over = true; wake(); });
+  rb.addEventListener('pointermove', e => { const f = at(e), tip = $('#rbTip'); if (!tip) return; const m = Lib.monthAt(f * Lib.total); tip.textContent = m ? m.label : ''; tip.style.top = e.clientY - rb.getBoundingClientRect().top + 'px'; tip.classList.add('show'); if (drag) sc.scrollTop = f * Lib.total - sc.clientHeight / 2 - off; });
+  /* taking hold of the marker itself moves the grid from where it is, with no jump; a press anywhere else goes there */
+  rb.addEventListener('pointerdown', e => { drag = true; rb.setPointerCapture(e.pointerId); off = e.target.closest('.rb-pos') ? at(e) * Lib.total - sc.clientHeight / 2 - sc.scrollTop : 0; sc.scrollTop = at(e) * Lib.total - sc.clientHeight / 2 - off; });
+  for (const ev of ['pointerup', 'pointercancel']) rb.addEventListener(ev, e => { drag = false; if (e.pointerType !== 'mouse') { over = false; noTip(); } wake(); });
+  rb.addEventListener('pointerleave', () => { over = false; noTip(); wake(); });
   Bus.on('filters', () => { Lib.renderFacets(); Lib.renderBar(); if (S.view === 'library') { Lib.layout(); sc.scrollTop = 0; } });
   Bus.on('sel', () => { Lib.paintSel(); Lib.renderBulk(); });
   Bus.on('synced', () => { Lib.refresh(); Dupes.load(); Sugg.load(); if (S.view === 'stories' && $('#reader').hidden) Stories.render(); });

@@ -155,6 +155,9 @@ await step('the grid never crops: every tile has its photo\'s own shape, and the
   assert.deepEqual(off, []);
   assert.deepEqual(await page.evaluate(() => [...new Set([...document.querySelectorAll('img, video')].map((i) => getComputedStyle(i).objectFit))]), ['contain']);
   assert.equal(await page.evaluate(() => [...document.querySelectorAll('button')].filter((b) => /load more/i.test(b.textContent || '')).length), 0);
+  // the grid runs to the edge of the page, with its scrollbar there, and the pictures have the same margin on both sides
+  const edge = await page.evaluate(() => { const sc = document.querySelector('#gridScroll')!, r = sc.getBoundingClientRect(), ts = [...document.querySelectorAll('#grid .tile')].map((t) => t.getBoundingClientRect()); return { gap: innerWidth - r.right, l: Math.min(...ts.map((t) => t.left)) - r.left, r: r.right - Math.max(...ts.map((t) => t.right)) }; });
+  assert.equal(edge.gap, 0, 'nothing between the grid and the edge of the page'); assert.ok(Math.abs(edge.l - edge.r) <= 4, `the pictures are in the middle: ${edge.l} px on the left, ${edge.r} px on the right`);
   const heic = await S(page, 'S.items.find(i => i.fileName === "iphone.heic").id');
   assert.equal(await page.evaluate(async (id: string) => (await fetch(`/api/files/${id}/full`)).headers.get('content-type'), heic), 'image/webp', 'HEIC is shown through a full-size WebP');
   await shot(page, '02-grid');
@@ -1417,6 +1420,14 @@ await step('the page works on a phone-sized screen', async () => {
   await p3.waitForSelector('#grid .tile img.in');
   assert.ok(await p3.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no sideways scrolling');
   await shot(p3, '09-phone');
+  // the grid reaches the edge of the screen and the pictures sit in the middle of it
+  const edge = await p3.evaluate(() => { const sc = document.querySelector('#gridScroll')!, r = sc.getBoundingClientRect(), ts = [...document.querySelectorAll('#grid .tile')].map((t) => t.getBoundingClientRect()); return { gap: innerWidth - r.right, l: Math.min(...ts.map((t) => t.left)) - r.left, r: r.right - Math.max(...ts.map((t) => t.right)) }; });
+  assert.equal(edge.gap, 0, 'nothing between the grid and the edge of the screen'); assert.ok(Math.abs(edge.l - edge.r) <= 4, `the pictures are in the middle: ${edge.l} px on the left, ${edge.r} px on the right`);
+  // the timeline takes no room: it shows over the edge while the grid scrolls, and goes away again
+  const rbOn = 'document.querySelector("#ribbon").classList.contains("on")';
+  assert.equal(await S(p3, 'document.querySelector("#ribbon").hidden'), false, 'the library is long enough to have a timeline'); assert.equal(await S(p3, rbOn), false, 'the timeline is out of sight until the grid scrolls');
+  await S(p3, 'document.querySelector("#gridScroll").scrollTop = 240'); await until(p3, rbOn, 3000); await shot(p3, '09b-phone-timeline');
+  await until(p3, '!' + rbOn, 6000); await S(p3, 'document.querySelector("#gridScroll").scrollTop = 0'); await until(p3, rbOn, 3000); await until(p3, '!' + rbOn, 6000);
   // the top of a phone: account at the top right beside Add, the views on their own line under it, and with two spaces the tabs stay tabs
   const top = await p3.evaluate(() => Object.fromEntries(['#btnMe', '#btnUpload', '.views', '.lens', '.spaces'].map((q) => { const r = document.querySelector(q)!.getBoundingClientRect(); return [q, { l: r.left, r: r.right, t: r.top, b: r.bottom }]; }))) as any;
   assert.ok(top['#btnMe'].r <= 390 && top['#btnMe'].r > 340 && top['#btnUpload'].r <= top['#btnMe'].l && Math.abs(top['#btnMe'].t - top['#btnUpload'].t) < 8, 'account and Add share the top right corner');

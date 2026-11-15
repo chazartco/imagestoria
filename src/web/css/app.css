@@ -140,7 +140,9 @@ main { min-height: 0; position: relative; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; align-items: center; min-width: 0; }
 .ctl.size .sl { width: 96px; }
 .gridwrap { flex: 1; position: relative; min-height: 0; }
-#gridScroll { position: absolute; inset: 0 38px 0 0; overflow-y: auto; padding: 0 6px 0 14px; scrollbar-width: thin; }
+/* The grid runs to the edge of the page. --sbw is the width of its scrollbar (0 where scrollbars float, as on a phone),
+   set by the page, so the pictures have the same margin on both sides whichever kind of scrollbar there is. */
+#gridScroll { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 0 max(2px, calc(14px - var(--sbw, 0px))) 0 14px; scrollbar-width: thin; }
 #grid { position: relative; margin-bottom: 120px; }
 .grow { position: absolute; left: 0; right: 0; }
 .tile { position: absolute; top: 0; overflow: hidden; cursor: pointer; }
@@ -177,7 +179,12 @@ main { min-height: 0; position: relative; }
 .rs-thumb { height: 100%; flex: none; padding: 0; border: 0; }
 .rs-thumb img, .st img, .sim img { display: block; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity .4s; }
 .rs-thumb img.in, .st img.in, .sim img.in { opacity: 1; }
-#ribbon { position: absolute; right: 0; top: 0; bottom: 0; width: 38px; cursor: ns-resize; touch-action: none; user-select: none; }
+/* The timeline takes no room of its own: it lies over the right edge of the grid while the grid is being scrolled,
+   or while a mouse is near it, and fades away again. */
+#ribbon { position: absolute; right: var(--sbw, 0px); top: 0; bottom: 0; width: 38px; z-index: 2; cursor: ns-resize; touch-action: none; user-select: none; background: color-mix(in srgb, var(--bg) 84%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); opacity: 0; pointer-events: none; transition: opacity .25s; }
+#ribbon.on { opacity: 1; pointer-events: auto; }
+/* Under a finger only the amber marker can be held, so a swipe that starts at the edge of the screen scrolls as usual. */
+@media (pointer: coarse) { #ribbon.on { pointer-events: none; } #ribbon.on .rb-pos { pointer-events: auto; width: 5px; } .rb-pos::before { content: ''; position: absolute; inset: -14px -1px -14px -36px; } }
 .rb-year { position: absolute; right: 7px; font-size: 11px; font-weight: 600; color: var(--muted); transform: translateY(-50%); }
 .rb-dot { position: absolute; right: 15px; width: 3px; height: 3px; border-radius: 50%; background: var(--line); }
 .rb-pos { position: absolute; right: 1px; width: 3px; border-radius: 2px; background: var(--amber); pointer-events: none; }
