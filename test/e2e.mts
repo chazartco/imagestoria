@@ -1522,6 +1522,21 @@ await step('the page works on a phone-sized screen', async () => {
   await p3.context().close();
 });
 
+await step('on a phone, a settings window stays below the clock and above the home bar, so it can always be closed', async () => {
+  const p = await newPage({ width: 390, height: 844 });
+  await p.goto(app.base); await p.fill('#gateCard input[type=email]', 'owner@example.com'); await p.fill('#gateCard input[type=password]', PASSWORD); await p.click('#gateCard button[type=submit]');
+  await p.waitForSelector('#grid .tile img.in');
+  // the room an iPhone keeps for its clock and its home bar, as it reports them to a page opened from the home screen
+  await p.evaluate(() => { document.documentElement.style.setProperty('--sat', '47px'); document.documentElement.style.setProperty('--sab', '34px'); });
+  await S(p, 'go("admin")'); await p.waitForSelector('#v-admin [data-card=storage]');
+  for (const key of ['storage', 'backup', 'move']) {
+    await card(p, key);
+    const r = await p.evaluate(() => { const x = document.querySelector('#adModalClose')!.getBoundingClientRect(), b = document.querySelector('.ad-mbox')!.getBoundingClientRect(); return { top: x.top, bottom: b.bottom }; });
+    assert.ok(r.top >= 47, `${key}: the close button is below the clock (it starts at ${r.top} px)`); assert.ok(r.bottom <= 844 - 34 + 1, `${key}: the window ends above the home bar (at ${r.bottom} px)`);
+  }
+  await p.click('#adModalClose'); assert.equal(await p.$('#adModal'), null, 'and it closes');
+  await p.context().close();
+});
 await step('the site can be put on a phone\'s home screen: a manifest with icons, allowed by the security policy, and no service worker', async () => {
   const p4 = await newPage({ width: 390, height: 844 });
   await p4.addInitScript('window.__name = (f) => f');

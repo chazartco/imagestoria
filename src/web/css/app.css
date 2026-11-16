@@ -723,7 +723,8 @@ input[type=checkbox] { accent-color: var(--amber); width: 15px; height: 15px; }
 .ad-role { flex: none; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); } .ad-role.owner { border-color: var(--amber); color: var(--amber-text); background: var(--amber-soft); } .ad-role.editor { color: var(--text); }
 .ad-card.ad-space { display: grid; grid-template-columns: none; gap: 2px; border-radius: 12px; } .ad-card.ad-space[draggable=true] { cursor: grab; } .ad-card.ad-space .ad-grip { display: inline-flex; height: auto; margin-left: -3px; }
 .ad-card.ad-space.over { box-shadow: -3px 0 0 var(--amber); border-color: var(--amber); }
-.ad-modal { position: absolute; inset: 0; z-index: 8; display: grid; place-items: center; padding: 16px; background: rgba(6, 6, 7, .62); }
+/* The window stays clear of the phone's clock, its home bar and its rounded corners, like everything else that fills the screen. */
+.ad-modal { position: absolute; inset: 0; z-index: 8; display: grid; place-items: center; padding: max(16px, var(--sat)) max(16px, var(--sar)) max(16px, var(--sab)) max(16px, var(--sal)); background: rgba(6, 6, 7, .62); }
 .ad-mbox { display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(580px, 100%); max-height: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
 .ad-mbox.wide { width: min(1080px, 100%); } .ad-mbox > header { display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 18px; border-bottom: 1px solid var(--line); } .ad-mbox > header h2 { flex: 1; min-width: 0; font-size: 18px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ad-mbody { overflow: auto; padding: 16px 18px 18px; } .ad-mbody .ad-p { max-width: none; margin: 0 0 12px; font-size: 14px; } .ad-mbody .ad-p.ad-lead { color: var(--text); font-size: 15px; } .ad-mbody h3 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 0 0 4px; }
@@ -746,7 +747,7 @@ input[type=checkbox] { accent-color: var(--amber); width: 15px; height: 15px; }
 .pp-work .pp-people { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 14px 12px; } .pp-work .pp-noface { height: 84px; width: 68px; } .pp-work .pp-person .inp { height: 30px; } .pp-hint { font-size: 13px; margin: 0 0 12px; } .pp-empty { padding: 26px 0; }
 .pp-work .pp-q { gap: 18px; } .pp-work .pp-ask { font-size: 21px; }
 @media (max-width: 820px) {
-  #v-admin .ad-wrap { padding: 16px max(12px, var(--sar)) 50px max(12px, var(--sal)); } .ad-cards { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; } .ad-modal { padding: 0; } .ad-mbox, .ad-mbox.wide { width: 100%; height: 100%; max-height: 100%; border: 0; border-radius: 0; }
+  #v-admin .ad-wrap { padding: 16px max(12px, var(--sar)) 50px max(12px, var(--sal)); } .ad-cards { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; } .ad-modal { padding: var(--sat) var(--sar) var(--sab) var(--sal); background: var(--surface); } .ad-mbox, .ad-mbox.wide { width: 100%; height: 100%; max-height: 100%; border: 0; border-radius: 0; }
   .ad-two { grid-template-columns: minmax(0, 1fr); } .pp-work .pp-group { grid-template-columns: minmax(0, 1fr); } .pp-pickbar .inp, .pp-work .pp-gacts .inp { width: auto; flex: 1 1 140px; } .ad-form { grid-template-columns: minmax(0, 1fr); gap: 4px; } .ad-fl { padding-top: 8px; }
 }
 
