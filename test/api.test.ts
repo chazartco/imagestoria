@@ -229,6 +229,43 @@ describe('library, files, edits, people', () => {
     assert.equal(o.trash.n, 0); assert.ok(o.storage.orig > 0 && o.activity.length > 0);
   });
 
+  it('lets a browser keep the list between visits: a key, only what changed, and three numbers that say the list is whole', async () => {
+    const sums = (items: any[]) => ({ n: items.length, ids: items.reduce((a, i) => a + parseInt(i.id.slice(0, 8), 16), 0), vs: items.reduce((a, i) => a + (i.v % 1000000007), 0) });
+    await new Promise((r) => setTimeout(r, 2100));
+    const all = (await owner.get('/api/index')).data;
+    assert.equal(all.full, true); assert.match(all.key, /^[\w-]{20,}$/); assert.equal(all.sums, undefined, 'the numbers are worked out only when asked for');
+    assert.equal((await owner.get('/api/index')).data.key, all.key, 'the same person with the same spaces has the same key');
+    // nothing changed since: nothing is sent, and the numbers are those of the list the browser holds
+    const same = (await owner.get(`/api/index?since=${all.now + 3000}&key=${all.key}&check=1`)).data;
+    assert.equal(same.full, false); assert.deepEqual(same.items, []); assert.deepEqual(same.sums, sums(all.items));
+    // a change: one row comes, and with it the numbers match again
+    const one = all.items[0];
+    await new Promise((r) => setTimeout(r, 2100));
+    await owner.json('PATCH', `/api/items/${one.id}`, { title: 'Kept between visits' });
+    const delta = (await owner.get(`/api/index?since=${all.now}&key=${all.key}&check=1`)).data;
+    assert.deepEqual(delta.items.map((i: any) => i.id), [one.id]);
+    assert.notDeepEqual(delta.sums, sums(all.items), 'the old list no longer matches');
+    const merged = all.items.map((i: any) => (i.id === one.id ? delta.items[0] : i));
+    assert.deepEqual(delta.sums, sums(merged));
+    // an item deleted for good is in no answer about what changed, and the numbers still give it away
+    const extra = (await owner.upload(fixture('plain.png'), life)).data.id; await owner.settled();
+    const withExtra = (await owner.get('/api/index')).data;
+    await owner.post('/api/items/bulk', { ids: [extra], action: 'delete' }); await owner.post('/api/trash/empty');
+    const after = (await owner.get(`/api/index?since=${withExtra.now + 3000}&key=${withExtra.key}&check=1`)).data;
+    assert.deepEqual([after.items.length, after.removed.length], [0, 0]);
+    assert.equal(after.sums.n, withExtra.items.length - 1); assert.notDeepEqual(after.sums, sums(withExtra.items));
+    // a key that is not this person's own: everything is sent, whatever "since" says
+    const other = (await owner.get(`/api/index?since=${withExtra.now + 3000}&key=someone-elses&check=1`)).data;
+    assert.equal(other.full, true); assert.equal(other.items.length, other.sums.n); assert.equal(other.key, all.key);
+    // someone who may open fewer spaces has another key, so a list kept for one is never taken for the other's
+    const inv = await owner.post('/api/people/invite', { who: 'kim@example.com', role: 'viewer', spaceIds: [life] });
+    const kim = new Client(app.base);
+    await kim.post('/api/auth/accept-invite', { token: new URL(inv.data.link).searchParams.get('invite'), name: 'Kim', email: 'kim@example.com', password: 'a long enough password' });
+    const hers = (await kim.get('/api/index')).data;
+    assert.notEqual(hers.key, all.key);
+    assert.equal((await kim.get(`/api/index?since=${hers.now + 3000}&key=${all.key}`)).data.full, true);
+  });
+
   it('lets the owner add, rename and remove spaces', async () => {
     const made = await owner.post('/api/spaces', { name: 'Client Work', kind: 'studio' });
     assert.equal(made.data.slug, 'client-work');

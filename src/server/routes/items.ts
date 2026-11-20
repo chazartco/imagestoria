@@ -31,6 +31,8 @@ function parseWall(d: string) {
   return out;
 }
 
+/** Raise this when a row of the index gains, loses or changes a field: browsers that kept the old list then load it again. */
+const INDEX_SHAPE = 1;
 /** The compact row the grid, filters, map and timeline all work from. */
 const INDEX_SQL = sql`
   i.id, i.space_id as "space", i.kind, i.status, i.error, i.file_name as "fileName", i.mime,
@@ -149,23 +151,36 @@ export function registerItems(app: FastifyInstance, ctx: Ctx) {
    */
   app.get('/api/index', async (req) => {
     const me = need(req);
-    const q = z.object({ since: z.coerce.number().optional() }).parse(req.query);
-    if (!me.spaceIds.length) return { now: Date.now(), items: [], removed: [], places: {}, persons: {} };
+    const q = z.object({ since: z.coerce.number().optional(), key: z.string().max(80).optional(), check: z.string().max(4).optional() }).parse(req.query);
+    if (!me.spaceIds.length) return { now: Date.now(), key: '', full: !q.since, items: [], removed: [], places: {}, persons: {} };
     const spaceList = sql.join(me.spaceIds.map((s) => sql`${s}::uuid`), sql`, `);
-    const since = q.since ? new Date(q.since - 2000) : null;
     const now = Date.now();
     // People in the pictures are sent only for the spaces where this person may see them (see routes/faces.ts).
     const seen = await peopleSpaces(ctx, me);
+    // A browser may keep the list between visits and ask only for what changed (src/web/js/api.js). The key names what
+    // the list was made for: this person, the spaces they may open, the spaces whose people they may see, and the shape
+    // of a row. When the browser's key is not this one, "what changed" would not be enough, so it gets everything.
+    const key = crypto.createHash('sha256').update(JSON.stringify([INDEX_SHAPE, me.id, [...me.spaceIds].sort(), [...seen].sort()])).digest('base64url').slice(0, 32);
+    const full = !q.since || (q.key !== undefined && q.key !== key);
+    const since = full ? null : new Date(q.since! - 2000);
     const PEOPLE = seen.length ? sql`, case when i.space_id in (${sql.join(seen.map((s) => sql`${s}::uuid`), sql`, `)}) then coalesce((select array_agg(distinct f.person_id) from faces f where f.item_id = i.id and f.person_id is not null and f.status in ('confirmed', 'auto')), '{}') else '{}' end as people` : sql``;
     const names: Record<string, string> = {};
     if (seen.length) for (const p of await db.select({ id: schema.persons.id, name: schema.persons.name }).from(schema.persons).where(inArray(schema.persons.spaceId, seen))) names[p.id] = p.name;
-    const rows = await db.execute(sql`select ${INDEX_SQL}${PEOPLE} from items i where i.space_id in (${spaceList}) and i.deleted_at is null ${since ? sql`and i.updated_at > ${since.toISOString()}::timestamptz` : sql``} order by i.taken_at desc`);
+    const rows = await db.execute(sql`select ${INDEX_SQL}${PEOPLE} from items i where i.space_id in (${spaceList}) and i.deleted_at is null ${since ? sql`and i.updated_at > ${since.toISOString()}::timestamptz` : sql``} order by i.taken_at desc, i.added_at, i.id`);
     const removed = since
       ? (await db.execute(sql`select id from items where deleted_at is not null and updated_at > ${since.toISOString()}::timestamptz`)).rows.map((r: any) => r.id)
       : [];
     const places: Record<string, { name: string; region: string; lat: number; lng: number }> = {};
     for (const p of await db.select().from(schema.places)) places[p.id] = { name: p.name, region: p.region, lat: p.lat, lng: p.lng };
-    return { now, items: rows.rows.map((r: any) => ({ ...r, added: Number(r.added), v: Number(r.v), bOrig: Number(r.bOrig), bDisp: Number(r.bDisp), bThumb: Number(r.bThumb) })), removed, places, persons: names };
+    // check=1: three numbers that say exactly what this person's list holds now (how many items, which, and each one's
+    // last change). A browser that kept the list compares them with its own, and loads everything again if they differ.
+    let sums: { n: number; ids: number; vs: number } | undefined;
+    if (q.check) {
+      const [c] = (await db.execute(sql`select count(*)::int as n, coalesce(sum(('x' || substr(i.id::text, 1, 8))::bit(32)::bigint), 0)::text as ids,
+        coalesce(sum((extract(epoch from i.updated_at) * 1000)::bigint % 1000000007), 0)::text as vs from items i where i.space_id in (${spaceList}) and i.deleted_at is null`)).rows as any[];
+      sums = { n: c.n, ids: Number(c.ids), vs: Number(c.vs) };
+    }
+    return { now, key, full, sums, items: rows.rows.map((r: any) => ({ ...r, added: Number(r.added), v: Number(r.v), bOrig: Number(r.bOrig), bDisp: Number(r.bDisp), bThumb: Number(r.bThumb) })), removed, places, persons: names };
   });
 
   /** One item with the parts the grid does not need: comments, the edit recipe, its copies. */

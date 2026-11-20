@@ -1,4 +1,6 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
+import crypto from 'node:crypto';
+import os from 'node:os';
 import { z } from 'zod';
 import type { Ctx } from '../context.js';
 import { schema } from '../db/index.js';
@@ -32,17 +34,44 @@ export async function autoSetting(ctx: Ctx, db: Db = ctx.db): Promise<AutoSettin
 /* ---------- the faces of one space, in memory while they are being compared ---------- */
 
 export interface Face { id: string; item: string; v: Float32Array; person: string | null; status: string; quality: number; model: string; suggested: string | null }
-const dot = (a: Float32Array, b: Float32Array) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i]! * b[i]!; return s; };
+/** How alike two faces are. Grouping spends nearly all of its time here, so it adds four at a time. */
+const dot = (a: Float32Array, b: Float32Array) => {
+  const n = a.length, m = n - (n % 4); let s0 = 0, s1 = 0, s2 = 0, s3 = 0, i = 0;
+  for (; i < m; i += 4) { s0 += a[i]! * b[i]!; s1 += a[i + 1]! * b[i + 1]!; s2 += a[i + 2]! * b[i + 2]!; s3 += a[i + 3]! * b[i + 3]!; }
+  for (; i < n; i++) s0 += a[i]! * b[i]!;
+  return s0 + s1 + s2 + s3;
+};
+const LITTLE = os.endianness() === 'LE';
 
 export async function loadFaces(db: Db, spaceId: string): Promise<Face[]> {
   const rows = await db.execute(sql`
     select f.id, f.item_id as item, f.vec, f.person_id as person, f.status, f.quality, f.model, f.suggested_id as suggested
     from faces f join items i on i.id = f.item_id where i.space_id = ${spaceId}::uuid and i.deleted_at is null`);
   return (rows.rows as any[]).map((r) => {
-    const b: Buffer = r.vec, v = new Float32Array(b.length / 4);
-    for (let i = 0; i < v.length; i++) v[i] = b.readFloatLE(i * 4);
+    const b: Buffer = r.vec; let v: Float32Array;
+    // The numbers are stored low byte first. On a machine that keeps them the same way, which is nearly all of them, they are copied in one go.
+    if (LITTLE) v = new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + (b.length - (b.length % 4))));
+    else { v = new Float32Array(b.length / 4); for (let i = 0; i < v.length; i++) v[i] = b.readFloatLE(i * 4); }
     return { id: r.id, item: r.item, v, person: r.person, status: r.status, quality: r.quality, model: r.model, suggested: r.suggested };
   });
+}
+
+/* A group of faces that look alike: its middle (the direction they share), the sum the middle is made from, and its faces. */
+interface Mid { mid: Float32Array; sum: Float32Array; model: string }
+/** The group a face is most like, if any is like enough. */
+function closest(groups: Mid[], f: Face, near: number) {
+  let best = -1, top = near;
+  for (let g = 0; g < groups.length; g++) { if (groups[g]!.model !== f.model) continue; const s = dot(groups[g]!.mid, f.v); if (s >= top) { top = s; best = g; } }
+  return best;
+}
+const startMid = (f: Face): Mid => ({ mid: f.v, sum: Float32Array.from(f.v), model: f.model });
+/** A face joins a group, and the group's middle moves towards it. */
+function join(g: Mid, f: Face) {
+  const len = g.sum.length, mid = new Float32Array(len);
+  let n = 0; for (let i = 0; i < len; i++) { g.sum[i]! += f.v[i]!; n += g.sum[i]! * g.sum[i]!; }
+  n = Math.sqrt(n) || 1;
+  for (let i = 0; i < len; i++) mid[i] = g.sum[i]! / n;
+  g.mid = mid;
 }
 
 /**
@@ -50,16 +79,69 @@ export async function loadFaces(db: Db, spaceId: string): Promise<Face[]> {
  * The best likenesses go first, so the middles are set by good faces and not by blurred ones.
  */
 export function cluster(list: Face[], near: number) {
-  const groups: { mid: Float32Array; sum: Float32Array; faces: Face[]; model: string }[] = [];
+  const groups: (Mid & { faces: Face[] })[] = [];
   for (const f of [...list].sort((a, b) => b.quality - a.quality)) {
-    let best = -1, top = near;
-    for (let g = 0; g < groups.length; g++) { if (groups[g]!.model !== f.model) continue; const s = dot(groups[g]!.mid, f.v); if (s >= top) { top = s; best = g; } }
-    if (best < 0) { groups.push({ mid: f.v, sum: Float32Array.from(f.v), faces: [f], model: f.model }); continue; }
-    const g = groups[best]!; g.faces.push(f);
-    let n = 0; for (let i = 0; i < g.sum.length; i++) { g.sum[i]! += f.v[i]!; n += g.sum[i]! * g.sum[i]!; }
-    n = Math.sqrt(n) || 1; g.mid = g.sum.map((x) => x / n);
+    const best = closest(groups, f, near);
+    if (best < 0) { groups.push({ ...startMid(f), faces: [f] }); continue; }
+    groups[best]!.faces.push(f); join(groups[best]!, f);
   }
   return groups;
+}
+
+/* ---------- the groups of unnamed faces, kept between questions ----------
+ * Grouping a large space compares every unnamed face with every group, and that takes seconds. So the groups of a space
+ * are kept in memory once they are made. Afterwards only faces not seen before are placed: a face that was named or set
+ * aside simply drops out of its group, and a face that comes back returns to it. Naming one group no longer means working
+ * all the others out again.
+ *
+ * What is kept is made from embeddings: the middle of each group, which for a group of one is that face's own numbers.
+ * So it is treated as they are. It lives only in memory. It is thrown away when recognition is turned off for the space,
+ * when any face it was made from is gone (its picture deleted or moved), and when nobody has asked for it for half an
+ * hour. It is never written anywhere and never leaves the server.
+ */
+interface Kept { groups: (Mid & { ids: string[] })[]; seen: Set<string>; near: number; used: number }
+const kept = new Map<string, Kept>();
+const waiting = new Map<string, Promise<unknown>>();
+const KEEP_MS = 30 * 60 * 1000;
+setInterval(() => { for (const [k, v] of kept) if (Date.now() - v.used > KEEP_MS) kept.delete(k); }, 60 * 1000).unref();
+export function forgetGroups(spaceId?: string) { if (spaceId) kept.delete(spaceId); else kept.clear(); }
+const isOpen = (f: Face | undefined): f is Face => !!f && (f.status === 'unsorted' || f.status === 'suggested');
+
+async function regroup(spaceId: string, all: Face[], near: number) {
+  const byId = new Map(all.map((f) => [f.id, f]));
+  let k = kept.get(spaceId);
+  if (k && k.near !== near) k = undefined;
+  if (k) for (const id of k.seen) if (!byId.has(id)) { k = undefined; break; }
+  if (!k) k = { groups: [], seen: new Set(), near, used: 0 };
+  k.used = Date.now(); kept.set(spaceId, k);
+  // a group nobody is left in is dropped and its faces forgotten: one that comes back is placed afresh
+  const seen = k.seen;
+  k.groups = k.groups.filter((g) => { if (g.ids.some((id) => isOpen(byId.get(id)))) return true; for (const id of g.ids) seen.delete(id); return false; });
+  const fresh = all.filter((f) => isOpen(f) && !seen.has(f.id)).sort((a, b) => b.quality - a.quality);
+  let t = Date.now();
+  for (const f of fresh) {
+    const best = closest(k.groups, f, near);
+    if (best < 0) k.groups.push({ ...startMid(f), ids: [f.id] }); else { k.groups[best]!.ids.push(f.id); join(k.groups[best]!, f); }
+    seen.add(f.id);
+    // a long first pass lets the rest of the site answer in between
+    if (Date.now() - t > 40) { await new Promise((r) => setImmediate(r)); t = Date.now(); k.used = t; }
+  }
+  k.used = Date.now();
+  return k.groups.map((g) => ({ faces: g.ids.map((id) => byId.get(id)).filter(isOpen) })).filter((g) => g.faces.length);
+}
+
+/**
+ * The unnamed faces of a space in groups of look-alikes. `load` reads every face of the space as it is now.
+ * One at a time for a space: a second question waits for the first, and then has almost nothing left to do.
+ */
+export function groupsOf<T extends Face[]>(spaceId: string, load: () => Promise<T>, near: number): Promise<{ all: T; groups: { faces: Face[] }[] }> {
+  const run = (waiting.get(spaceId) ?? Promise.resolve()).catch(() => {}).then(async () => {
+    try { const all = await load(); return { all, groups: await regroup(spaceId, all, near) }; }
+    catch (e) { kept.delete(spaceId); throw e; }
+  });
+  waiting.set(spaceId, run);
+  void run.catch(() => {}).then(() => { if (waiting.get(spaceId) === run) waiting.delete(spaceId); });
+  return run;
 }
 
 /**
@@ -121,7 +203,7 @@ export async function matchFaces(ctx: Ctx, db: Db, spaceId: string) {
  * "How often would automatic naming have been right?" Each confirmed face is taken out in turn and named again from
  * the others, at several thresholds. The owner reads the table and picks the threshold.
  */
-export function numbers(all: Face[], cfg: Ctx['cfg']) {
+function countNumbers(all: Face[], cfg: Ctx['cfg']) {
   const refs = references(all, cfg), known = all.filter((f) => f.person && f.status === 'confirmed');
   const tries = known.map((f) => {
     const near = nearest(f, refs, undefined, f.id), a = near[0], b = near[1];
@@ -135,6 +217,17 @@ export function numbers(all: Face[], cfg: Ctx['cfg']) {
     return { threshold: t, right, wrong, asked: tries.length - right - wrong };
   });
   return { faces: tries.length, people: refs.size, minConfirmed: cfg.FACE_AUTO_MIN_CONFIRMED, gap: cfg.FACE_GAP, rows };
+}
+
+/** That table takes a second or more in a large space and only changes when a confirmed face does, so the last one is remembered. It holds counts only. */
+const counted = new Map<string, { key: string; out: ReturnType<typeof countNumbers> }>();
+export function numbers(spaceId: string, all: Face[], cfg: Ctx['cfg']) {
+  const h = crypto.createHash('sha1').update([cfg.FACE_LOOK, cfg.FACE_GAP, cfg.FACE_AUTO_MIN_CONFIRMED].join(','));
+  for (const f of all) if (f.person && f.status === 'confirmed') h.update(f.id + f.person);
+  const key = h.digest('hex'), had = counted.get(spaceId);
+  if (had?.key === key) return had.out;
+  const out = countNumbers(all, cfg); counted.set(spaceId, { key, out });
+  return out;
 }
 
 /* ---------- what a worker hands in ---------- */
@@ -248,6 +341,7 @@ export async function forgetSpace(ctx: Ctx, spaceId: string) {
     await tx.delete(persons).where(eq(persons.spaceId, spaceId));
     await tx.execute(sql`delete from ai_tasks where task = 'faces' and item_id in ${ids}`);
   });
+  forgetGroups(spaceId); counted.delete(spaceId);
 }
 
 /** An item that moves to another space leaves its people behind: they belong to the space it came from. */

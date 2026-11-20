@@ -470,6 +470,14 @@ measured from a script and the page was tested with a stand-in. The owner should
 - **Statuses:** `unsorted`, `suggested`, `confirmed` (a person said so), `auto` (named without asking),
   `ignored`, `notface`.
 - **Grouping** is leader clustering by likeness, best faces first (`cluster` in `src/server/ai/faces.ts`).
+  It compares every unnamed face with every group, which took most of a minute for 24,000 faces. So the
+  groups of a space are kept in memory once made (`groupsOf`). After that only faces not seen before are
+  placed: a named face drops out of its group, a face that comes back returns to it. The first question
+  after a restart is still slow (about 30 seconds in that test, with the rest of the site answering in
+  between), later ones take half a second. What is kept is made from embeddings, so it is thrown away
+  when recognition is turned off, when a face it was made from is gone, and after half an hour unused.
+  It is never written to disk. The settings page does not wait for any of this: its board is drawn
+  first and the three face cards fill in when the answer arrives (`Admin.loadFaces`).
 - **References.** Only confirmed faces count as evidence. An automatic name never becomes evidence for
   the next one. A person's confirmed faces are clustered into looks and up to 8 faces of each look are
   kept as references, so a child at three and at thirteen is one person with two looks.
@@ -759,6 +767,22 @@ keeps the list in memory. Search, filters, grouping, the timeline and the map al
 the browser, which is why they answer instantly. Afterwards the page asks only for what changed
 (`GET /api/index?since=<ms>`): every 25 seconds, or every 1.5 seconds while something is being
 processed. Deleted items come back in `removed`.
+
+The list is also kept between visits, in the browser's IndexedDB (`Kept` in `src/web/js/api.js`). For
+20,000 items the whole list is 23 MB, about 1.9 MB compressed, and it used to be downloaded on every
+visit. Now a visit reads the kept list and asks only for what changed, a few kilobytes. Three things
+keep it honest:
+
+- **A key.** The server names what a list was made for: the person, the spaces they may open, the
+  spaces whose people they may see, and the shape of a row (`INDEX_SHAPE` in `routes/items.ts`). A
+  request with another key gets everything. Raise `INDEX_SHAPE` when a row gains or loses a field.
+- **Three numbers.** With `check=1` the server sends how many items the person may see, a sum over
+  their ids and a sum over their last-changed times. The page works out the same from its list. If they
+  differ for any reason (an item deleted for good, a missed change) it loads everything again.
+- **Signing out empties it**, and so does arriving signed out. It is kept under the person's id, so
+  one person never gets another's list.
+
+If the browser will not keep it (a private window, no room), the list is loaded in full as before.
 
 This is a deliberate trade. It is simple and fast up to the tens of thousands of items (see the
 numbers above). Somewhere past 100,000 the first load will want splitting by year or moving filters to

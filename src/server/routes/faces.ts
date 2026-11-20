@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import sharp from 'sharp';
 import { z } from 'zod';
-import { autoSetting, cluster, forgetSpace, loadFaces, matchFaces, numbers, references, tidyFaces } from '../ai/faces.js';
+import { autoSetting, forgetSpace, groupsOf, loadFaces, matchFaces, numbers, references, tidyFaces } from '../ai/faces.js';
 import { queueTasks } from '../ai/tasks.js';
 import { logActivity, need, needCap, needSpace, type SessionUser } from '../auth/core.js';
 import { type Ctx, HttpError, bad, forbidden, notFound } from '../context.js';
@@ -52,11 +52,12 @@ export function registerFaces(app: FastifyInstance, ctx: Ctx) {
     const auto = await autoSetting(ctx);
     const settings = { auto: auto.on, threshold: auto.threshold, minConfirmed: cfg.FACE_AUTO_MIN_CONFIRMED, mayAdmin: me.caps.admin };
     if (!s.people) return { on: false, ...settings, people: [], groups: [], singles: [], counts: null };
-    const all = await loadFaces(db, q.space), refs = references(all, cfg);
+    // the groups of unnamed faces are kept between questions (see ai/faces.ts), so only faces not seen before are placed
+    const { all, groups: found } = await groupsOf(q.space, () => loadFaces(db, q.space), cfg.FACE_CLUSTER), refs = references(all, cfg);
     const ps = await db.select().from(persons).where(eq(persons.spaceId, q.space)).orderBy(asc(persons.name));
     const count = (f: (x: (typeof all)[number]) => boolean) => all.filter(f).length;
     const open = all.filter((f) => f.status === 'unsorted' || f.status === 'suggested');
-    const groups = cluster(open, cfg.FACE_CLUSTER).sort((a, b) => b.faces.length - a.faces.length);
+    const groups = found.sort((a, b) => b.faces.length - a.faces.length);
     const slim = (f: (typeof all)[number]) => ({ id: f.id, item: f.item });
     const [wait] = (await db.execute(sql`select count(*)::int as n from ai_tasks t join items i on i.id = t.item_id where t.task = 'faces' and t.status in ('queued', 'claimed') and i.space_id = ${q.space}::uuid and i.deleted_at is null`)).rows as { n: number }[];
     return {
@@ -88,7 +89,7 @@ export function registerFaces(app: FastifyInstance, ctx: Ctx) {
   app.get('/api/faces/numbers', async (req) => {
     const q = z.object({ space: uuid }).parse(req.query);
     await needPeople(req, q.space);
-    return numbers(await loadFaces(db, q.space), cfg);
+    return numbers(q.space, await loadFaces(db, q.space), cfg);
   });
 
   /**

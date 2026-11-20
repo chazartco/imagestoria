@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { sql } from 'drizzle-orm';
+import { cluster, forgetGroups, groupsOf, type Face } from '../src/server/ai/faces.js';
 import { Client, FakeWorker, fixture, startApp } from './helpers.js';
 
 /** Phase 3, stage 4: people. A fake worker posts faces, and people name them. */
@@ -295,5 +296,50 @@ describe('people in the pictures', () => {
     assert.equal((await owner.post('/api/faces/settings', { wipe: true })).status, 200);
     assert.deepEqual([await count('faces'), await count('persons'), await count(`ai_tasks where task = 'faces'`), await count(`settings where key = 'faces:auto'`)], [0, 0, 0, 0]);
     assert.deepEqual((await owner.get('/api/bootstrap')).data.spaces.map((s: any) => s.people), [false, false]);
+  });
+});
+
+/** The groups of unnamed faces are kept in memory between questions, so naming one group does not mean grouping the rest again. */
+describe('the groups of unnamed faces, kept between questions', () => {
+  const mk = (id: string, who: number, shot: number, quality = 0.8): Face => { const v = new Float32Array(64); v[who] = 1; v[shot] = 0.2; return { id, item: 'item-' + id, v, person: null, status: 'unsorted', quality, model: 'm', suggested: null }; };
+  const shape = (gs: { faces: Face[] }[]) => gs.map((g) => g.faces.map((f) => f.id).sort().join(' ')).sort();
+  const NEAR = 0.45;
+
+  it('gives the groups a fresh pass would, drops a named face, takes it back, and places a new face among its own', async () => {
+    forgetGroups();
+    let all = [mk('a1', 0, 10, 0.9), mk('a2', 0, 11), mk('a3', 0, 12), mk('b1', 1, 13), mk('b2', 1, 14), mk('c1', 2, 15)];
+    let loads = 0; const ask = async () => shape((await groupsOf('space-1', async () => { loads++; return all; }, NEAR)).groups);
+    assert.deepEqual(await ask(), ['a1 a2 a3', 'b1 b2', 'c1']);
+    assert.deepEqual(await ask(), shape(cluster(all, NEAR)), 'the same groups as working them out from nothing');
+    // a face a person named is no longer waiting: it leaves its group and the others stay where they were
+    const named = (id: string) => { all = all.map((f) => (f.id === id ? { ...f, status: 'confirmed', person: 'p1' } : f)); };
+    named('a1'); assert.deepEqual(await ask(), ['a2 a3', 'b1 b2', 'c1']);
+    // the name is taken back: the face returns to the group it was in
+    all = all.map((f) => (f.id === 'a1' ? { ...f, status: 'unsorted', person: null } : f)); assert.deepEqual(await ask(), ['a1 a2 a3', 'b1 b2', 'c1']);
+    // a new picture is read: its face joins the people it looks like, and a stranger starts a group
+    all = [...all, mk('b3', 1, 16), mk('d1', 3, 17)]; assert.deepEqual(await ask(), ['a1 a2 a3', 'b1 b2 b3', 'c1', 'd1']);
+    // a whole group is named: it is gone, and a face of it that comes back later is placed afresh
+    named('c1'); assert.deepEqual(await ask(), ['a1 a2 a3', 'b1 b2 b3', 'd1']);
+    all = all.map((f) => (f.id === 'c1' ? { ...f, status: 'unsorted', person: null } : f)); assert.deepEqual(await ask(), ['a1 a2 a3', 'b1 b2 b3', 'c1', 'd1']);
+    assert.equal(loads, 7, 'every question reads the faces as they are now');
+  });
+
+  it('starts again when a face it was made from is gone, keeps spaces apart, and answers two questions at once', async () => {
+    forgetGroups();
+    let all = [mk('a1', 0, 10, 0.9), mk('a2', 0, 11), mk('b1', 1, 13)];
+    const ask = async (space = 'space-1', list = () => all) => shape((await groupsOf(space, async () => list(), NEAR)).groups);
+    assert.deepEqual(await ask(), ['a1 a2', 'b1']);
+    // a picture is deleted: nothing made from its face is kept, and the rest is grouped from nothing
+    all = all.filter((f) => f.id !== 'a1'); assert.deepEqual(await ask(), ['a2', 'b1']);
+    assert.deepEqual(await ask(), shape(cluster(all, NEAR)));
+    // another space has its own faces and its own groups
+    const theirs = [mk('z1', 0, 10), mk('z2', 0, 11)];
+    assert.deepEqual(await ask('space-2', () => theirs), ['z1 z2']); assert.deepEqual(await ask(), ['a2', 'b1']);
+    // two people open the page at the same moment
+    const both = await Promise.all([ask(), ask()]); assert.deepEqual(both[0], both[1]); assert.deepEqual(both[0], ['a2', 'b1']);
+    // a question that fails leaves nothing half made behind
+    await assert.rejects(groupsOf('space-1', async () => { throw new Error('the database is away'); }, NEAR)); assert.deepEqual(await ask(), ['a2', 'b1']);
+    // turned off: what was kept is thrown away
+    forgetGroups('space-1'); all = []; assert.deepEqual(await ask(), []);
   });
 });

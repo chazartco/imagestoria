@@ -178,8 +178,24 @@ await step('the viewer saves a title, description, tag, comment and like, and th
   await page.mouse.move(fr.x + fr.width / 2, fr.y + fr.height / 2); await page.waitForSelector('#loupe.show');
   await shot(page, '03-viewer');
   await page.keyboard.press('Escape'); await page.waitForTimeout(900);
+  // The browser keeps the list between visits. A reload asks only for what changed since, with the numbers that prove the list is whole.
+  const asked: string[] = [], note = (r: any) => { if (r.url().includes('/api/index')) asked.push(new URL(r.url()).search); }; page.on('request', note);
   await page.reload(); await page.waitForSelector('#grid .tile');
   assert.deepEqual(await S(page, `(i => [i.title, i.desc, i.tags, i.nc, i.fav])(S.byId.get("${id}"))`), ['Morning at the café', 'First light, nobody around.', ['sunrise'], 1, true]);
+  page.off('request', note);
+  assert.ok(asked.length > 0 && asked.every((q) => /[?&]since=\d+/.test(q)) && /check=1/.test(asked[0]!), `the reload asked only for what changed: ${JSON.stringify(asked)}`);
+  await until(page, 'Kept.read(S.me.id).then(r => !!r && r.rows.length === S.items.length && r.meta.at === Sync.at)', 5000);
+  // a list that has drifted is noticed: with one row quietly missing from what the browser kept, the next visit loads everything again
+  const lost = await S(page, `S.items.find(i => i.id !== "${id}" && i.kind === "photo").id`), order = await S(page, 'S.items.map(i => i.id).join()');
+  await S(page, `Kept.tx('readwrite', items => { items.delete("${lost}"); })`);
+  asked.length = 0; page.on('request', note);
+  await page.reload(); await page.waitForSelector('#grid .tile'); page.off('request', note);
+  assert.equal(await S(page, `S.byId.has("${lost}")`), true); assert.ok(asked.some((q) => q === ''), `everything was loaded again: ${JSON.stringify(asked)}`);
+  // and the next visit starts from the kept list again, in the order the server gives it
+  await until(page, 'Kept.read(S.me.id).then(r => !!r && r.rows.length === S.items.length && r.meta.at === Sync.at)', 5000);
+  asked.length = 0; page.on('request', note);
+  await page.reload(); await page.waitForSelector('#grid .tile'); page.off('request', note);
+  assert.ok(asked.every((q) => /[?&]since=\d+/.test(q)), JSON.stringify(asked)); assert.equal(await S(page, 'S.items.map(i => i.id).join()'), order);
 });
 
 await step('the viewer is a modal at 90% of the screen, zooms into the original in place, and folds its details away', async () => {

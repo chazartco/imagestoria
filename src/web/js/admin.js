@@ -6,14 +6,28 @@ const Admin = {
   people: [], over: null, modal: null,
   isOpen() { return !$('#admin').hidden; },
   /* It opens on "Loading", never on what it showed last time: a redraw a moment later would wipe whatever was being typed. */
-  open() { if (!can('admin')) return; closePop(); this.over = null; this.modal = null; this.dropModal(); $('#admin').hidden = false; this.render(); $('#v-admin').scrollTop = 0; },
+  open() { if (!can('admin')) return; closePop(); this.over = null; Naming.data = null; this.modal = null; this.dropModal(); $('#admin').hidden = false; this.render(); $('#v-admin').scrollTop = 0; },
   close() { if (!this.isOpen()) return; closePop(); this.modal = null; this.dropModal(); $('#admin').hidden = true; },
   /* Escape closes the window on top first, then the page */
   esc() { if (this.modal) this.closeModal(); else this.close(); },
   async load() {
-    const [p, o, w, pd, pub, exp] = await Promise.all([api('GET', '/api/people'), api('GET', '/api/admin/overview'), api('GET', '/api/admin/workers'), api('GET', '/api/admin/places'), api('GET', '/api/admin/public'), api('GET', '/api/admin/exports'), Naming.load().catch(() => { Naming.data = null; })]);
+    this.loadFaces();
+    const [p, o, w, pd, pub, exp] = await Promise.all([api('GET', '/api/people'), api('GET', '/api/admin/overview'), api('GET', '/api/admin/workers'), api('GET', '/api/admin/places'), api('GET', '/api/admin/public'), api('GET', '/api/admin/exports')]);
     this.people = p.people; this.over = o; this.work = w; this.placeData = pd; this.pub = pub; this.exp = exp;
   },
+  /* Who is in the pictures is the slowest thing on this page to work out in a large library, so the board never waits
+     for it. Its cards say they are loading and fill in when the answer arrives. Only that row is drawn again then, and
+     a window that is open is left alone unless it is one of theirs: nothing being typed elsewhere is lost. */
+  loadFaces() {
+    const n = this._fl = (this._fl || 0) + 1; Naming.busy = true;
+    Naming.load().catch(() => { Naming.data = null; }).then(() => {
+      if (n !== this._fl) return; Naming.busy = false;
+      if (!this.isOpen() || !this.over) return;
+      const row = $('#adFaces'); if (row) row.replaceWith(this.facesGroup());
+      if (['faces', 'auto', 'recog'].includes(this.modal)) this.paintModal(false);
+    });
+  },
+  facesGroup() { return this.group('People in the pictures', `In ${curSpace().name}, the space you are in`, Naming.cards(), 'adFaces'); },
   render() {
     const box = $('#v-admin');
     if (!can('admin')) { box.innerHTML = ''; box.append(el('div', { class: 'ad-wrap' }, el('h1', { text: 'People and settings' }), el('p', { class: 'empty', text: 'Only the owner can open this page.' }))); return; }
@@ -85,7 +99,7 @@ const Admin = {
     wrap.append(this.group('Spaces', S.spaces.length > 1 ? 'Drag a card to change the order of the tabs' : 'A space is a separate library with its own people', scards, 'adSpaces'));
 
     /* who is in the pictures, for the space in use */
-    wrap.append(this.group('People in the pictures', `In ${curSpace().name}, the space you are in`, Naming.cards(), 'adFaces'));
+    wrap.append(this.facesGroup());
 
     /* the library and the server */
     const cards = [], bk = o.backup, wk = this.work, pd = this.placeData, vd = o.video, st = o.storage, tr = o.trash;
@@ -352,8 +366,8 @@ const Admin = {
         el('p', { class: 'vi-note ad-span', text: 'The export does not hold the pictures. Coming from the hosted service: point this server at the same Space (STORAGE_DRIVER=s3 with the same bucket and prefix), then import. Going to the hosted service from pictures on this disk: copy the media folder into your Space first (npm run media:push), then import there.' })) };
     },
     /* who is in the pictures: three windows that live in people.js */
-    faces() { return Naming.mFaces(); },
-    auto() { return Naming.mAuto(); },
-    recog() { return Naming.mRecog(); }
+    faces() { return Naming.wait() || Naming.mFaces(); },
+    auto() { return Naming.wait() || Naming.mAuto(); },
+    recog() { return Naming.wait() || Naming.mRecog(); }
   }
 };

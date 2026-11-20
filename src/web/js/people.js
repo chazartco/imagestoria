@@ -81,8 +81,12 @@ const Naming = {
   openItem(id) { if (S.byId.has(id)) Viewer.open(id, [S.byId.get(id)]); },
 
   /* ----- the cards ----- */
+  /* still being worked out: what a card and a window say until the answer is here */
+  waiting() { return this.busy && (!this.data || this.data.space !== S.space); },
+  wait() { return this.waiting() ? { title: 'People in the pictures', body: el('p', { class: 'muted', id: 'ppWait', text: 'Loading' }) } : null; },
   cards() {
     const d = this.data, sp = curSpace();
+    if (this.waiting()) return [Admin.card('recog', 'People recognition', 'Loading', `Looking through the faces in ${sp.name}`, 'busy')];
     if (!d) return [Admin.card('recog', 'People recognition', 'Not available', 'It could not be loaded', 'off')];
     if (!d.on) return [Admin.card('recog', 'People recognition', 'Off', `Faces are not looked for in ${sp.name}`, 'off')];
     const c = d.counts, q = this.review.suggested.length, chk = this.review.auto.length, todo = c.unsorted + q;

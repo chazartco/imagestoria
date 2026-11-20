@@ -110,7 +110,7 @@ function meMenu(btn) {
   if (S.cfg.auth.local) list.append(el('button', { class: 'mi', html: icon('eye', 16) + `<span>${u.hasPassword ? 'Change password' : 'Set a password'}</span>`, onclick: () => { closePop(); passwordSheet(); } }));
   if (sso && !u.oidcLinked) list.append(el('button', { class: 'mi', html: icon('link', 16) + `<span>Connect ${esc(sso.name)}</span>`, onclick: () => { location.href = '/api/auth/oidc/start?link=1'; } }));
   list.append(el('button', { class: 'mi', html: icon('book', 16) + '<span>Keyboard shortcuts</span>', onclick: () => { closePop(); $('#keys').hidden = false; } }));
-  list.append(el('hr'), el('button', { class: 'mi', html: icon('right', 16) + '<span>Sign out</span>', onclick: () => api('POST', '/api/auth/logout').then(() => location.replace('/'), () => location.replace('/')) }));
+  list.append(el('hr'), el('button', { class: 'mi', html: icon('right', 16) + '<span>Sign out</span>', onclick: () => api('POST', '/api/auth/logout').then(() => Kept.clear(), () => { }).then(() => location.replace('/')) }));
   popover(btn, list);
 }
 
@@ -221,7 +221,7 @@ function startApp(b) {
   addEventListener('resize', () => { showSpaceTab(); if (!$('#reader').hidden || S.view === 'stories') { clearTimeout(startApp._rt); startApp._rt = setTimeout(() => Stories.relayout(), 150); } });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) Sync.soon(); });
 
-  if (!S.spaces.length) { $('#app').hidden = true; return Gate.show('Nothing to open yet', 'You are signed in, but the owner has not given you a space. Ask them to tick one for you in People and settings.', el('button', { class: 'btn', text: 'Sign out', onclick: () => api('POST', '/api/auth/logout').then(() => location.replace('/')) })); }
+  if (!S.spaces.length) { $('#app').hidden = true; return Gate.show('Nothing to open yet', 'You are signed in, but the owner has not given you a space. Ask them to tick one for you in People and settings.', el('button', { class: 'btn', text: 'Sign out', onclick: () => api('POST', '/api/auth/logout').then(() => Kept.clear()).then(() => location.replace('/')) })); }
   const saved = store.get('space', '');
   setSpace(S.spaces.some(s => s.id === saved) ? saved : S.spaces[0].id);
   Sync.schedule();
@@ -248,7 +248,8 @@ async function boot() {
     if (await Public.boot(pub ? pub[1] || null : null, !!b.me)) return;
     if (pub) history.replaceState(null, '', '/');
   }
-  if (!b.me) return Gate.signin(q.get('auth_error'));
+  /* nobody is signed in: the list a signed-in person kept on this device does not stay behind */
+  if (!b.me) { Kept.clear(); return Gate.signin(q.get('auth_error')); }
   const linked = q.get('linked'), err = q.get('auth_error'); if (location.search) clean();
   try { await Promise.all([Sync.full(), Stories.load()]); }
   catch (e) { return Gate.show('The library could not be loaded', e.message, el('button', { class: 'btn', text: 'Reload', onclick: () => location.reload() })); }
