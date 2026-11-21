@@ -254,6 +254,10 @@ class VisionModel:
             raise BadAnswer("The model took too long to answer.") from e
         except httpx.HTTPError as e:
             raise ModelDown(f"The model server at {self.endpoint} does not answer ({type(e).__name__}).") from e
+        if r.status_code >= 500 and "prediction aborted" in r.text:
+            # The server is well. It stopped the model on this one picture, most often because the model began repeating itself.
+            # Calling that "the server is down" would have the worker give the picture back and be handed it again, for ever.
+            raise BadAnswer(f"The model was stopped on this picture: {r.text[:200]}")
         if r.status_code >= 500 or r.status_code == 404:
             raise ModelDown(f"The model server answered {r.status_code}: {r.text[:200]}")
         if r.status_code >= 400:

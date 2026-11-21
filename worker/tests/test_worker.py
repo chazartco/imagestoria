@@ -274,6 +274,15 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(len(site.posted), 1)
         self.assertEqual(sorted(site.released), [item(2)["id"], item(3)["id"]])
 
+    def test_a_picture_the_model_is_stopped_on_fails_alone_and_the_rest_go_on(self):
+        stopped = (500, {"error": {"message": "prediction aborted, token repeat limit reached", "type": "api_error"}})
+        site, model = FakeSite([item(1), item(2), item(3)]), FakeModel([GOOD, stopped, stopped, GOOD])
+        w = Worker(make(site, model))
+        self.run_for(w, 1)
+        self.assertEqual(len(site.posted), 3, "every picture is answered for, the stopped one with an error")
+        self.assertEqual(site.released, [], "nothing is given back to be handed out again")
+        self.assertEqual(sum("prediction aborted" in str(p) for p in site.posted), 1)
+
     def test_a_refused_token_waits_five_minutes_between_tries(self):
         site, model = FakeSite([item(1)]), FakeModel([GOOD])
         w = Worker(make(site, model, token="aiw_revoked"))
